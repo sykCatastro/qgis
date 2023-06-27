@@ -1,0 +1,211 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>EditObjetoGraficoDialogBase</class>
+ <widget class="QDialog" name="EditObjetoGraficoDialogBase">
+  <property name="windowModality">
+   <enum>Qt::NonModal</enum>
+  </property>
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>930</width>
+    <height>439</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>ABM Objetos Gráficos</string>
+  </property>
+  <widget class="QPushButton" name="buttonBuscar">
+   <property name="geometry">
+    <rect>
+     <x>830</x>
+     <y>10</y>
+     <width>91</width>
+     <height>31</height>
+    </rect>
+   </property>
+   <property name="toolTip">
+    <string>Guardar</string>
+   </property>
+   <property name="text">
+    <string>Buscar</string>
+   </property>
+  </widget>
+  <widget class="QPushButton" name="buttonAsociar">
+   <property name="geometry">
+    <rect>
+     <x>10</x>
+     <y>390</y>
+     <width>121</width>
+     <height>41</height>
+    </rect>
+   </property>
+   <property name="toolTip">
+    <string>Seleccionar Objeto en Mapa</string>
+   </property>
+   <property name="text">
+    <string>Asociar</string>
+   </property>
+  </widget>
+  <widget class="QComboBox" name="comboObjeto">
+   <property name="geometry">
+    <rect>
+     <x>10</x>
+     <y>10</y>
+     <width>191</width>
+     <height>31</height>
+    </rect>
+   </property>
+   <item>
+    <property name="text">
+     <string>Parcelas</string>
+    </property>
+   </item>
+   <item>
+    <property name="text">
+     <string>Prescripciones</string>
+    </property>
+   </item>
+   <item>
+    <property name="text">
+     <string>Manzanas</string>
+    </property>
+   </item>
+   <item>
+    <property name="text">
+     <string>Calles</string>
+    </property>
+   </item>
+   <item>
+    <property name="text">
+     <string>Barrios</string>
+    </property>
+   </item>
+   <item>
+    <property name="text">
+     <string>Centros Urbanos</string>
+    </property>
+   </item>
+   <item>
+    <property name="text">
+     <string>Localidades</string>
+    </property>
+   </item>
+   <item>
+    <property name="text">
+     <string>Secciones</string>
+    </property>
+   </item>
+   <item>
+    <property name="text">
+     <string>Jurisdicciones</string>
+    </property>
+   </item>
+   <item>
+    <property name="text">
+     <string>Departamentos</string>
+    </property>
+   </item>
+  </widget>
+  <widget class="QPushButton" name="buttonDesasociar">
+   <property name="geometry">
+    <rect>
+     <x>160</x>
+     <y>390</y>
+     <width>121</width>
+     <height>41</height>
+    </rect>
+   </property>
+   <property name="toolTip">
+    <string>Seleccionar Nueva Geometría</string>
+   </property>
+   <property name="text">
+    <string>Desasociar</string>
+   </property>
+  </widget>
+  <widget class="QLineEdit" name="lineBuscar">
+   <property name="geometry">
+    <rect>
+     <x>210</x>
+     <y>10</y>
+     <width>611</width>
+     <height>31</height>
+    </rect>
+   </property>
+  </widget>
+  <widget class="QLabel" name="labelNoEncontrado">
+   <property name="geometry">
+    <rect>
+     <x>10</x>
+     <y>360</y>
+     <width>211</width>
+     <height>19</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;&lt;span style=&quot; color:#ff0000;&quot;&gt;No se encontraron resultados&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+   </property>
+  </widget>
+  <widget class="QTableWidget" name="resultsTable">
+   <property name="geometry">
+    <rect>
+     <x>10</x>
+     <y>50</y>
+     <width>911</width>
+     <height>301</height>
+    </rect>
+   </property>
+   <property name="font">
+    <font>
+     <pointsize>12</pointsize>
+    </font>
+   </property>
+   <property name="editTriggers">
+    <set>QAbstractItemView::AnyKeyPressed|QAbstractItemView::EditKeyPressed</set>
+   </property>
+   <property name="alternatingRowColors">
+    <bool>true</bool>
+   </property>
+   <property name="selectionMode">
+    <enum>QAbstractItemView::SingleSelection</enum>
+   </property>
+   <property name="selectionBehavior">
+    <enum>QAbstractItemView::SelectRows</enum>
+   </property>
+   <attribute name="verticalHeaderVisible">
+    <bool>false</bool>
+   </attribute>
+   <column>
+    <property name="text">
+     <string>Geom</string>
+    </property>
+   </column>
+   <column>
+    <property name="text">
+     <string>Nombre</string>
+    </property>
+   </column>
+   <column>
+    <property name="text">
+     <string>Descripción</string>
+    </property>
+   </column>
+  </widget>
+  <widget class="QLabel" name="labelResultados">
+   <property name="geometry">
+    <rect>
+     <x>10</x>
+     <y>360</y>
+     <width>721</width>
+     <height>19</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>Mostrando X de Y resultados. Para una mejor precisión , ajuste el filtro ingresado.</string>
+   </property>
+  </widget>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>
