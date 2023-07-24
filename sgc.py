@@ -576,11 +576,9 @@ class SGC:
             self.outer = outer_self
             self.data = data
             self.asociar = asociar
-            print(data)
             super(SGC.ServerLoaderUpdateGeometryEOG, self).__init__(outer_self.iface)
         def run(self):
             try:
-                print(json.dumps(self.data))
                 r = requests.put(url = self.outer.URL + "objeto_geometry", data = json.dumps(self.data),headers={'Authorization': "Bearer {}".format(self.outer.TOKEN)})
                 self.outer.dataEOG = r.json()
                 self.outer.dataEOG["asociar"] = self.asociar
@@ -678,12 +676,12 @@ class SGC:
 
     def selectMapFeatureByClick(self,capa = ""):
         search_layers = []
-        for l in self.layers: 
-            if l["fisico"] == capa:
+        for l in self.layers:
+            if l["fisico"] == capa or l["fisico"] == "vw_parcelas_sanear_urb" or l["fisico"] == "vw_parcelas_sanear_rur":
                 search_layers.append(l["obj"])
         self.minimizeDialog(self.whichDialog)
         
-        self.selectFeatureMsg = QgsMessageBarItem("Seleccione un objeto de la capa de dibujo correspondiente al objeto a asociar, haciendo click con el mouse. Tecla ESC para cancelar",level=Qgis.Info, duration=0)
+        self.selectFeatureMsg = QgsMessageBarItem("Seleccione un objeto de la capa correspondiente al objeto a asociar, haciendo click con el mouse. Tecla ESC para cancelar",level=Qgis.Info, duration=0)
         self.iface.messageBar().pushItem(self.selectFeatureMsg)
         # Connection with map feature selection tool
         canvas = self.iface.mapCanvas()
@@ -822,14 +820,9 @@ class SGC:
         for f in files:
             os.remove(f)
         # Add parent root groups
-        self.groups = [] # List of all groups
-        if len(self.dataLayers) > 0:
-            root_groups = list(filter(lambda l: l["padre"] is None,self.dataLayers["grupos"]))
-            root_groups.sort(key=lambda l: l['id'],reverse=False)
-        else:
-            QMessageBox.warning(self.dlgLG, "Error de Indexación", "Cargando indices. Espere unos minutos y vuelva a acceder con su usuario más tarde.")
-            return(self.logout(True))
-
+        self.groups = [] # List of all groups 
+        root_groups = list(filter(lambda l: l["padre"] is None,self.dataLayers["grupos"]))
+        root_groups.sort(key=lambda l: l['id'],reverse=False)
         for r in root_groups:
             self.groups.append({"id": r["id"], "inicial": r["inicial"],"obj": QgsProject.instance().layerTreeRoot().addGroup(r["nombre"])})
             parent = self.groups[-1]
@@ -994,9 +987,8 @@ class SGC:
                 
     def desasociarTramiteGeometry(self):
         item = self.dlgET.entradasTree.model().itemFromIndex(self.dlgET.entradasTree.selectionModel().selectedIndexes()[0]).data()
-        print(item)
-        nombre_capa_dibujo = "DIBUJO:VW_PARCELAS_GRAF_ALFA" if item["tipo"] == "PARCELA" or item["tipo"] == "PRESCRIPCION" else "DIBUJO:VW_MANZANAS"
-        nombre_capa_feature = "TEMPORAL:PARCELAS" if item["tipo"] == "PARCELA" or item["tipo"] == "PRESCRIPCION" else "TEMPORAL:MANZANAS"
+        nombre_capa_dibujo = "DIBUJO:VW_PARCELAS_GRAF_ALFA" if item["tipo"] == "PARCELA" else "DIBUJO:VW_MANZANAS"
+        nombre_capa_feature = "TEMPORAL:PARCELAS" if item["tipo"] == "PARCELA" else "TEMPORAL:MANZANAS"
         dibujoFeatureLayer = [l["obj"] for l in self.layers if l["fisico"] == nombre_capa_dibujo][0]
         featureLayer = [l["obj"] for l in self.layers if l["fisico"] == nombre_capa_feature][0]
         feature = None
@@ -1542,7 +1534,6 @@ class SGC:
             else:
                 logging.warning("Error en query geometria: " + r.text)
                 if not no_error_message:
-                    print(r)
                     QMessageBox.warning(dialog, "Error", "El objeto seleccionado no posee geometría")
         except requests.exceptions.ConnectionError:
             logging.info("Error en servidor")
@@ -1560,7 +1551,6 @@ class SGC:
 
     # ABM objetos graficos
     def finishedUpdateGeometryEOG(self, feature):
-        print("Entra en funcion finished")
         self.waitMsg.done(0)
         asociar = self.dataEOG["asociar"]
         item = self.dlgEOG.resultsTable.currentItem().data(32)
@@ -1599,7 +1589,6 @@ class SGC:
         self.waitMsg.done(0)
         
         if message == "db":
-            print(self.dataEOG)
             asociar = self.dataEOG["asociar"]
             error_response = self.dataEOG["ERROR"]
             logging.warning(f"Error en {'asociado' if asociar else 'desasociado'} geometrico de objeto sin tramite: {error_response}")
@@ -1630,7 +1619,6 @@ class SGC:
 
     def EOGupdateGeometria(self, asociar = True, feature = None):
         item = self.dlgEOG.resultsTable.currentItem().data(32)
-        print(item)
         message = QMessageBox(QMessageBox.Question, f"{'Asociación' if asociar else 'Desasociación'} de geometría", 
             f"¿Está seguro de que desea {'asociar la geometría elegida al' if asociar else 'desasociar la geometría del'} objeto seleccionado?"
             f"\nObjeto seleccionado: \nTipo: {item['tipo']}\nNombre: {item['nombre']}\nDescripción: {item['descripcion']}",
@@ -1643,7 +1631,6 @@ class SGC:
             item["hostname"] = platform.uname()[1]
             self.waitMsg = self.messageWait("Espere mientras se procesa el cambio...")
             thread = self.ServerLoaderUpdateGeometryEOG(self, item, asociar)
-            print("Antes de finished")
             thread.finished.connect(lambda: self.finishedUpdateGeometryEOG(feature))
             thread.failed.connect(self.failedUpdateGeometryEOT)
             thread.start() 
@@ -1675,6 +1662,7 @@ class SGC:
                 #docs.sort(key=lambda f: f['nombre'],reverse=False)
                 if len(docs) > 0:
                     for d in docs:
+                        print(d)
                         if self.dlgEOG.comboObjeto.currentText().lower() != 'parcelas' and self.dlgEOG.comboObjeto.currentText().lower() != 'prescripciones':
                             d['dato_tienegeom'] = d['dato_tienegeom'] == "TRUE"
                             d['descripcion'] = re.sub(r'<br>', "\n", d['descripcion'])
