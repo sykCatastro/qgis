@@ -819,6 +819,30 @@ class SGC:
         files = glob.glob(f"{layer_path}*.qlr")
         for f in files:
             os.remove(f)
+        # Remove layers from map
+        if hasattr(self, 'dataLayers') and self.dataLayers is not None and "grupos" in self.dataLayers:
+                # Just in case, remove temporarily added group
+                self.loadTramiteLayerGroup(True)
+                # Remove groups/layers from database
+                for g in self.dataLayers["grupos"]:
+                    root = QgsProject.instance().layerTreeRoot()
+                    group = root.findGroup(g["nombre"])
+                    if group is not None:
+                        for child in group.children():
+                            if isinstance(child,QgsLayerTreeGroup):
+                                root.removeChildNode(child)
+                            else:
+                                QgsProject.instance().removeMapLayer(child.layerId())
+                        root.removeChildNode(group)
+                # Remove "Dibujos" group
+                group = root.findGroup("Dibujos")
+                if group is not None:
+                    for child in group.children():
+                        if isinstance(child,QgsLayerTreeGroup):
+                            root.removeChildNode(child)
+                        else:
+                            QgsProject.instance().removeMapLayer(child.layerId())
+                    root.removeChildNode(group)
         # Add parent root groups
         self.groups = [] # List of all groups 
         root_groups = list(filter(lambda l: l["padre"] is None,self.dataLayers["grupos"]))
