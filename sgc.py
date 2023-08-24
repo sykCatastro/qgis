@@ -8,8 +8,8 @@
                               -------------------
         begin                : 2020-12-15
         git sha              : $Format:%H$
-        copyright            : (C) 2021 by Maximiliano Monti
-        email                : renzomiguelmonti@gmail.com
+        copyright            : (C) SyK Catastro Sistemas
+        email                : sykcatastro.sistemas@gmail.com
  ***************************************************************************/
 
 /***************************************************************************
@@ -1687,11 +1687,11 @@ class SGC:
                 if len(docs) > 0:
                     for d in docs:
                         print(d)
+                        items = []
                         if self.dlgEOG.comboObjeto.currentText().lower() != 'parcelas' and self.dlgEOG.comboObjeto.currentText().lower() != 'prescripciones':
                             d['dato_tienegeom'] = d['dato_tienegeom'] == "TRUE"
                             d['descripcion'] = re.sub(r'<br>', "\n", d['descripcion'])
                             self.dlgEOG.resultsTable.insertRow(self.dlgEOG.resultsTable.rowCount())
-                            items = []
                             items.append(QTableWidgetItem(QIcon(os.path.join(self.current_dir,'icons/ok.png')) if d['dato_tienegeom'] else QIcon(os.path.join(self.current_dir,'icons/cancel.png')),""))
                             items.append(QTableWidgetItem(f"{d['nombre'] if 'nombre' in d else ''}{'-' if 'nombre' in d and 'dato_nomenclatura' in d else ''}{d['dato_nomenclatura'] if 'dato_nomenclatura' in d else ''}"))
                             items.append(QTableWidgetItem(d['descripcion']))
@@ -1705,11 +1705,10 @@ class SGC:
                                 items[i].setData(32,d)
                                 self.dlgEOG.resultsTable.setItem(self.dlgEOG.resultsTable.rowCount() - 1,i,items[i])
                         else:
-                            if int(str(d['descripcion'])[str(d['descripcion']).find('Superficie')+12: str(d['descripcion']).find('Superficie')+13]) > 0:
+                            if str(d['descripcion'])[str(d['descripcion']).find('Superficie')+12: str(d['descripcion']).find('Superficie')+15] > '0 m2':
                                 d['dato_tienegeom'] = d['dato_tienegeom'] == "TRUE"
                                 d['descripcion'] = re.sub(r'<br>', "\n", d['descripcion'])
                                 self.dlgEOG.resultsTable.insertRow(self.dlgEOG.resultsTable.rowCount())
-                                items = []
                                 items.append(QTableWidgetItem(QIcon(os.path.join(self.current_dir,'icons/ok.png')) if d['dato_tienegeom'] else QIcon(os.path.join(self.current_dir,'icons/cancel.png')),""))
                                 items.append(QTableWidgetItem(f"{d['nombre'] if 'nombre' in d else ''}{'-' if 'nombre' in d and 'dato_nomenclatura' in d else ''}{d['dato_nomenclatura'] if 'dato_nomenclatura' in d else ''}"))
                                 items.append(QTableWidgetItem(d['descripcion']))
@@ -1728,7 +1727,7 @@ class SGC:
                     if len(docs) == 1 and self.dlgEOG.comboObjeto.currentText().lower() != 'parcelas':
                         self.consultaItemClicked(items[0], no_error_message = True)
                     if len(docs) == 1 and self.dlgEOG.comboObjeto.currentText().lower() == 'parcelas':
-                        if int(str(d['descripcion'])[str(d['descripcion']).find('Superficie')+12: str(d['descripcion']).find('Superficie')+13]) == 0:
+                        if str(d['descripcion'])[str(d['descripcion']).find('Superficie')+12: str(d['descripcion']).find('Superficie')+15] in ['0 m2', '0 ha']:
                             self.dlgEOG.labelNoEncontrado.setVisible(True)
                             self.dlgEOG.labelResultados.setVisible(False)
                         else:
@@ -1745,7 +1744,7 @@ class SGC:
         except (KeyboardInterrupt, SystemExit): raise
         except:
             logging.warning("Error en busqueda: " + str(sys.exc_info()[0]) + str(sys.exc_info()[1]))
-            QMessageBox.warning(self.dlgEOG, "Error", "Error en busqueda")
+            QMessageBox.warning(self.dlgEOG, "Error", "No se pueden asociar o desasociar parcelas sin superficie")
 
     """
         RUN METHODS
