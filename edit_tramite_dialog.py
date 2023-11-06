@@ -8,8 +8,8 @@
                              -------------------
         begin                : 2020-12-15
         git sha              : $Format:%H$
-        copyright            : (C) 2020 by Maximiliano Monti
-        email                : renzomiguelmonti@gmail.com
+        copyright            : (C) SyK Catastro Sistemas
+        email                : sykcatastro.sistemas@gmail.com
  ***************************************************************************/
 
 /***************************************************************************

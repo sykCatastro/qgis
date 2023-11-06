@@ -69,17 +69,7 @@
    </item>
    <item>
     <property name="text">
-     <string>Parcelas Saneables</string>
-    </property>
-   </item>
-   <item>
-    <property name="text">
      <string>Manzanas</string>
-    </property>
-   </item>
-   <item>
-    <property name="text">
-     <string>Calles</string>
     </property>
    </item>
    <item>

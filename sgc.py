@@ -677,11 +677,11 @@ class SGC:
     def selectMapFeatureByClick(self,capa = ""):
         search_layers = []
         for l in self.layers:
-            if l["fisico"] == capa or l["fisico"] == "vw_parcelas_sanear_urb" or l["fisico"] == "vw_parcelas_sanear_rur":
+            if l["fisico"] == capa or l["fisico"] in ["vw_parcelas_sanear"]:
                 search_layers.append(l["obj"])
         self.minimizeDialog(self.whichDialog)
         
-        self.selectFeatureMsg = QgsMessageBarItem("Seleccione un objeto de la capa correspondiente al objeto a asociar, haciendo click con el mouse. Tecla ESC para cancelar",level=Qgis.Info, duration=0)
+        self.selectFeatureMsg = QgsMessageBarItem("Seleccione un objeto de la capa correspondiente al objeto a asociar, haciendo click con el mouse. Cuando lo haga, espere un momento dicho proceso. Tecla ESC para cancelar",level=Qgis.Info, duration=0)
         self.iface.messageBar().pushItem(self.selectFeatureMsg)
         # Connection with map feature selection tool
         canvas = self.iface.mapCanvas()
@@ -694,13 +694,13 @@ class SGC:
         """ Trigger event for the selection of a polygon/feature in current layer """
         for f in features:
             feature = features[0]
-        
         self.abortFeatureSelect()
         if self.whichDialog == "EditTramite":
             self.featureAsociadaET(feature)
         if self.whichDialog == "EditObjetoGrafico":
             self.EOGupdateGeometria(asociar = True, feature = feature)
-
+    
+ 
     """
         --- END ---
     """
@@ -1582,7 +1582,7 @@ class SGC:
         QMessageBox.information(self.dlgEOG, "Éxito", f"Geometría {'asociada' if asociar else 'desasociada'} con éxito.\n\nEl buscador puede demorar unos minutos en actualizarse.")
         if asociar: # Borrar objeto de capa de dibujo
             capa = item['capa']
-            if capa == "VW_PARCELAS_GRAF_ALFA_RURALES" or capa == "VW_PARCELAS_PRESCRIPCIONES": # Fix for VW_PARCELAS_GRAF_ALFA_RURALES y PRESCRIPCIONES
+            if capa in ["VW_PARCELAS_GRAF_ALFA_RURALES", "VW_PARCELAS_PRESCRIPCIONES", "VW_PARCELAS_PH"]: # Fix for VW_PARCELAS_GRAF_ALFA_RURALES PRESCRIPCIONES PH
                 capa = "VW_PARCELAS_GRAF_ALFA"
             featureLayer = [l["obj"] for l in self.layers if l["fisico"] == f"DIBUJO:{capa}"][0]
             featureLayer.deleteFeatures([feature.id()])
@@ -1594,7 +1594,7 @@ class SGC:
             reply = message.exec()
             if reply == QMessageBox.Yes:
                 capa = item['capa']
-                if capa == "VW_PARCELAS_GRAF_ALFA_RURALES" or capa == "VW_PARCELAS_PRESCRIPCIONES": # Fix for VW_PARCELAS_GRAF_ALFA_RURALES y PRESCRIPCIONES
+                if capa in ["VW_PARCELAS_GRAF_ALFA_RURALES", "VW_PARCELAS_PRESCRIPCIONES", "VW_PARCELAS_PH"]: # Fix for VW_PARCELAS_GRAF_ALFA_RURALES  PRESCRIPCIONES PH
                     capa = "VW_PARCELAS_GRAF_ALFA"
                 featureLayer = [l["obj"] for l in self.layers if l["fisico"] == f"DIBUJO:{capa}"][0]
                 new_dibujo_feature = QgsFeature()
@@ -1605,9 +1605,10 @@ class SGC:
 
         # Ŕefrescar capa WFS (pasa en asociar y desasociar)
         capa = item['capa']
-        wfsLayer = [l["obj"] for l in self.layers if l["fisico"] == capa][0]
-        wfsLayer.dataProvider().reloadData()
-        wfsLayer.triggerRepaint()
+        if capa in ["VW_PARCELAS_PH"]: #Fix for PH
+            wfsLayer = [l["obj"] for l in self.layers if l["fisico"] == capa][0]
+            wfsLayer.dataProvider().reloadData()
+            wfsLayer.triggerRepaint()
 
     def failedUpdateGeometryEOT(self,message):
         self.waitMsg.done(0)
@@ -1637,7 +1638,7 @@ class SGC:
     def EOGasociarGeometria(self):
         item = self.dlgEOG.resultsTable.currentItem().data(32)
         capa = item['capa']
-        if capa == "VW_PARCELAS_GRAF_ALFA_RURALES" or capa == "VW_PARCELAS_PRESCRIPCIONES": # Fix for VW_PARCELAS_GRAF_ALFA_RURALES y PRESCRIPCIONES
+        if capa in ["VW_PARCELAS_GRAF_ALFA_RURALES", "VW_PARCELAS_PRESCRIPCIONES", "VW_PARCELAS_PH"]: # Fix for VW_PARCELAS_GRAF_ALFA_RURALES y PRESCRIPCIONES
             capa = "VW_PARCELAS_GRAF_ALFA"
         self.selectMapFeatureByClick(capa = f"DIBUJO:{capa}")
 
