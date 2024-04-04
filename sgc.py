@@ -566,7 +566,6 @@ class SGC:
             except (KeyboardInterrupt, SystemExit): 
                 raise
             except:
-                #print("ERROR: " + str(sys.exc_info()[0]) + str(sys.exc_info()[1])  + str(sys.exc_info()[2]))
                 self.failed.emit("server")
 
     class ServerLoaderUpdateGeometryEOG(QThread):
@@ -941,11 +940,8 @@ class SGC:
             tipo_layer_padre = [p["tipo"] for p in self.dataET["entradas"] if p["id"] == id_padres[0]][0]
             nombre_layer_padre = "TEMPORAL:PARCELAS" if tipo_layer_padre in ["PARCELA COMUN"] else "TEMPORAL:MANZANAS"
             layer_padre = [lay["obj"] for lay in self.layers if lay["fisico"] == nombre_layer_padre][0]
-            print(nombre_layer_padre)
-            print(layer_padre)
             for id in id_padres:
                 feature_iterator = layer_padre.getFeatures( QgsFeatureRequest( QgsExpression( f"\"id\"={id}")))
-                print(id)
                 for f in feature_iterator:
                     padre_geom.append(f.geometry())
             fusion_geom = padre_geom[0]
@@ -973,8 +969,8 @@ class SGC:
                         errores_verificacion.append(f"El objeto geométrico seleccionado se superpone a otro del mismo tipo y jerarquía en más de un {self.dataET['parametros']['TOLERANCIA_SUPERPOSICION']}%")  
                         se_superpone = True
 
-        # Que tenga objeto grafico padre (necesario para calcular contenedor)
-        if item["anidacion"] > 0 and not tiene_padre:
+        # Que tenga objeto grafico padre (necesario para calcular contenedor) salvo que sea prescripcion
+        if str(self.dataET["tramite"]["objeto"]) != 'Mensura Para Prescripción Adquisitiva' and item["anidacion"] > 0 and not tiene_padre:
             errores_verificacion.append("Se debe asociar el objeto gráfico padre primero")
         # Que no exceda de la superficie detallada en el registro
         if (item["superficie"] is not None) and ((area_feature < float(item["superficie"]) - tolerancia_feature_area) or (area_feature > float(item["superficie"]) + tolerancia_feature_area)):
@@ -1153,7 +1149,7 @@ class SGC:
 
     def tramiteTreeSelectedItem(self):
         item = self.dlgET.entradasTree.model().itemFromIndex(self.dlgET.entradasTree.selectionModel().selectedIndexes()[0]).data()
-        self.dlgET.asociarButton.setEnabled(not item["asociada"])
+        self.dlgET.asociarButton.setEnabled(not item["asociada"] and item.get("descripcion", "") != "SIN ORIGEN")
         self.dlgET.desasociarButton.setEnabled(item["asociada"])
         self.highlightTramiteFeature(item)
 
@@ -1199,17 +1195,17 @@ class SGC:
         self.dlgET.lineJurisdiccion.setText(str(self.dataET["tramite"]["jurisdiccion"]))
         
         # Fix for fecha ingreso
-        self.dataET["tramite"]["fecha_vto"] = re.search('([0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2})\.?.*', self.dataET["tramite"]["fecha_vto"]) if self.dataET["tramite"]["fecha_vto"] is not None else None
+        self.dataET["tramite"]["fecha_vto"] = re.search('([0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2})\\.?.*', self.dataET["tramite"]["fecha_vto"]) if self.dataET["tramite"]["fecha_vto"] is not None else None
         self.dataET["tramite"]["fecha_vto"] = self.dataET["tramite"]["fecha_vto"].group(1) if self.dataET["tramite"]["fecha_vto"] is not None else None
         self.dlgET.DateVencimiento.setDateTime(QDateTime.fromString(self.dataET["tramite"]["fecha_vto"] if self.dataET["tramite"]["fecha_vto"] is not None else "1900-01-01 00:00:00","yyyy-MM-dd HH:mm:ss"))
         
         # Fix for fecha libro diario weird format with microseconds and such        
-        self.dataET["tramite"]["fecha_libro_diario"] = re.search('([0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2})\.?.*', self.dataET["tramite"]["fecha_libro_diario"]) if self.dataET["tramite"]["fecha_libro_diario"] is not None else None
+        self.dataET["tramite"]["fecha_libro_diario"] = re.search('([0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2})\\.?.*', self.dataET["tramite"]["fecha_libro_diario"]) if self.dataET["tramite"]["fecha_libro_diario"] is not None else None
         self.dataET["tramite"]["fecha_libro_diario"] = self.dataET["tramite"]["fecha_libro_diario"].group(1) if self.dataET["tramite"]["fecha_libro_diario"] is not None else None
         self.dlgET.DateLibroDiario.setDateTime(QDateTime.fromString(self.dataET["tramite"]["fecha_libro_diario"] if self.dataET["tramite"]["fecha_libro_diario"] is not None else "1900-01-01 00:00:00","yyyy-MM-dd HH:mm:ss"))
         
         # Fix for fecha ingreso
-        self.dataET["tramite"]["fecha_ingreso"] = re.search('([0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2})\.?.*', self.dataET["tramite"]["fecha_ingreso"]) if self.dataET["tramite"]["fecha_ingreso"] is not None else None
+        self.dataET["tramite"]["fecha_ingreso"] = re.search('([0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2})\\.?.*', self.dataET["tramite"]["fecha_ingreso"]) if self.dataET["tramite"]["fecha_ingreso"] is not None else None
         self.dataET["tramite"]["fecha_ingreso"] = self.dataET["tramite"]["fecha_ingreso"].group(1) if self.dataET["tramite"]["fecha_ingreso"] is not None else None
         self.dlgET.DateIngreso.setDateTime(QDateTime.fromString(self.dataET["tramite"]["fecha_ingreso"],"yyyy-MM-dd HH:mm:ss")) if self.dataET["tramite"]["fecha_ingreso"] is not None else self.dlgET.DateIngreso.clear()
         
@@ -1283,6 +1279,23 @@ class SGC:
                     parent = [p for p in parents if p.data()["id"] == c["id_padre"]][0]
                 elif c["id_padre"] in [p.data()["id"] for p in children]:
                     parent = [p for p in children if p.data()["id"] == c["id_padre"]][0]
+                elif str(self.dataET["tramite"]["objeto"]) == 'Mensura Para Prescripción Adquisitiva':
+                    parents.append(QStandardItem(QIcon(os.path.join(self.current_dir,'icons/cancel.png')), 'PARCELAS SIN ORIGEN'))
+                    parents[-1].setData({"id": c["id_padre"],
+                                 "asociada": False,
+                                 "tipo": c["descripcion"], 
+                                 "descripcion" : "SIN ORIGEN",
+                                 "tabla_grafica": c["tabla_grafica"], 
+                                 "featid": c["featid"],
+                                 "tabla": c["tabla"],
+                                 "superficie": c["superficie"] if "superficie" in c else None,
+                                 "anidacion": 0,
+                                 "id_objeto": c["id_objeto"] if "id_objeto" in c else None})
+                    font = parents[-1].font()
+                    font.setPointSize(13)
+                    parents[-1].setFont(font)
+                    model.appendRow(parents[-1])
+                    parent = parents[-1]
                 if parent:
                     if c['descripcion'] == "PARCELA":
                         descripcion = f"{c['descripcion']} {c['origen_o_destino']}: ID s/Plano: {c['id_plano']} – Tipo: {c['tipo'] if 'tipo' in c else ''}"
@@ -1307,7 +1320,6 @@ class SGC:
                     for e in self.dataET["entradas"]:
                         if e["id"] == c["id"]:
                             e["anidacion"] = parent.data()["anidacion"] + 1
-
                     font = child.font()
                     font.setPointSize(13)
                     child.setFont(font)
@@ -1315,6 +1327,9 @@ class SGC:
                     children.append(child)
                     children_data.pop(children_data.index(c))
                     break
+        print('Configurando el modelo del QTreeView...')
+        print('Número de padres:', len(parents))
+        print('Número de hijos:', len(children))         
         # Tree view configs
         self.dlgET.entradasTree.setModel(model)
         self.dlgET.entradasTree.setUniformRowHeights(True)
@@ -1389,6 +1404,9 @@ class SGC:
         for l in [l["obj"] for l in self.layers if l["tipo"] != "oms"]:
             l.removeSelection()
         # Dialog Show
+        print('Asignando datos a los ítems del QTreeView...')
+        print('Número de padres creados:', len(parents))
+        print('Número de hijos creados:', len(children))
         self.minimizeDialog("dlgBT")
         self.dlgET.show()
 
@@ -1538,7 +1556,7 @@ class SGC:
 
                 if "envelope" in geometry:
                     envelope = geometry["envelope"]
-                    env_points = re.split(",| ",re.search('(?<=^POLYGON\(\().+(?=\)\))', envelope).group(0))
+                    env_points = re.split(",| ",re.search('(?<=^POLYGON\\(\\().+(?=\\)\\))', envelope).group(0))
                     x_extent = abs(float(env_points[0]) - float(env_points[4]))
                     y_extent = abs(float(env_points[1]) - float(env_points[5]))
                     rect = QgsRectangle(mapPoint.x() - x_extent * 1.3, mapPoint.y() - y_extent * 1.3, mapPoint.x() + x_extent  * 1.3, mapPoint.y() + y_extent * 1.3)
@@ -1679,7 +1697,6 @@ class SGC:
             r = requests.get(url = self.URL + "search_ABM", data = json.dumps({"search_terms": self.dlgEOG.lineBuscar.text(),"tipo": self.dlgEOG.comboObjeto.currentText().lower()}),
                              headers={'Authorization': "Bearer {}".format(self.TOKEN)})
             if r and r.status_code == 200:
-                print(self.dlgEOG.comboObjeto.currentText().lower())
                 logging.info("Succesful search request")
                 total_docs = int(r.json()["response"]["numFound"])
                 docs = r.json()["response"]["docs"]
@@ -1687,7 +1704,6 @@ class SGC:
                 #docs.sort(key=lambda f: f['nombre'],reverse=False)
                 if len(docs) > 0:
                     for d in docs:
-                        print(d)
                         items = []
                         if self.dlgEOG.comboObjeto.currentText().lower() != 'parcelas' and self.dlgEOG.comboObjeto.currentText().lower() != 'prescripciones':
                             d['dato_tienegeom'] = d['dato_tienegeom'] == "TRUE"
@@ -1788,35 +1804,42 @@ class SGC:
 
 
     def runBandeja(self):
-        self.toggleEnableToolbarIcons(False)
-        if self.first_start_BT == True:
-            self.first_start_BT = False
-            self.dlgBT = BandejaDialog()
-            # Lock resizing for user
-            self.dlgBT.setMaximumSize(self.dlgBT.size())
-            self.dlgBT.setMinimumSize(self.dlgBT.size())
-            self.defaultSizeBT = self.dlgBT.size()
-            self.dlgBT.setGeometry((QDesktopWidget().screenGeometry().width() / 2) - (self.defaultSizeBT.width() / 2),(QDesktopWidget().screenGeometry().height() / 2) - (self.defaultSizeBT.height() / 2),self.defaultSizeBT.width(),self.defaultSizeBT.height())
-            # table settings
-            self.dlgBT.tableTramites.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
-            self.dlgBT.tableTramites.horizontalHeader().setVisible(True) # only because QT Designer keeps setting this to False
-            # Event handlers
-            self.dlgBT.closed.connect(self.toggleEnableToolbarIcons)
-            self.dlgBT.rejected.connect(self.toggleEnableToolbarIcons)
-            self.dlgBT.prevButton.clicked.connect(lambda: self.changeBandejaPage("prev"))
-            self.dlgBT.nextButton.clicked.connect(lambda: self.changeBandejaPage("next"))
-            self.dlgBT.reloadButton.clicked.connect(lambda: self.changeBandejaPage("reload"))
-            self.dlgBT.okButton.clicked.connect(self.procesarTramite)
-            self.dlgBT.tableTramites.horizontalHeader().sectionClicked.connect(self.BTtableHeaderClick)
-            
-        self.securityBandejaTramite()
-        self.bandejaPage = 0
-        self.waitMsg = self.messageWait("Espere mientras se carga la bandeja de trámites...")
-        thread = self.ServerLoaderBandejaTramites(self,self.bandejaPage)
-        thread.finished.connect(self.finishedBandejaTramites)
-        thread.failed.connect(self.failedBandejaTramites)
-        thread.start() 
-
+        try:
+            self.toggleEnableToolbarIcons(False)
+            if self.first_start_BT == True:
+                self.first_start_BT = False
+                self.dlgBT = BandejaDialog()
+                # Lock resizing for user
+                self.dlgBT.setMaximumSize(self.dlgBT.size())
+                self.dlgBT.setMinimumSize(self.dlgBT.size())
+                self.defaultSizeBT = self.dlgBT.size()
+                self.dlgBT.setGeometry((QDesktopWidget().screenGeometry().width() / 2) - (self.defaultSizeBT.width() / 2),(QDesktopWidget().screenGeometry().height() / 2) - (self.defaultSizeBT.height() / 2),self.defaultSizeBT.width(),self.defaultSizeBT.height())
+                # table settings
+                self.dlgBT.tableTramites.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+                self.dlgBT.tableTramites.horizontalHeader().setVisible(True) # only because QT Designer keeps setting this to False
+                # Event handlers
+                self.dlgBT.closed.connect(self.toggleEnableToolbarIcons)
+                self.dlgBT.rejected.connect(self.toggleEnableToolbarIcons)
+                self.dlgBT.prevButton.clicked.connect(lambda: self.changeBandejaPage("prev"))
+                self.dlgBT.nextButton.clicked.connect(lambda: self.changeBandejaPage("next"))
+                self.dlgBT.reloadButton.clicked.connect(lambda: self.changeBandejaPage("reload"))
+                self.dlgBT.okButton.clicked.connect(self.procesarTramite)
+                self.dlgBT.tableTramites.horizontalHeader().sectionClicked.connect(self.BTtableHeaderClick)
+            self.securityBandejaTramite()
+            self.bandejaPage = 0
+            self.waitMsg = self.messageWait("Espere mientras se carga la bandeja de trámites...")
+            thread = self.ServerLoaderBandejaTramites(self,self.bandejaPage)
+            thread.finished.connect(self.finishedBandejaTramites)
+            thread.failed.connect(self.failedBandejaTramites)
+            thread.start()
+        except Exception as e:
+            # Manejo del error: registro, notificación al usuario, etc.
+            logging.error("Error en Bandeja de Tramite: {}".format(str(e)))
+            # Notificar al usuario del error
+            self.showErrorMessage("Se ha producido un error al ejecutar la bandeja de trámites.")
+            # Habilitar nuevamente los íconos de la barra de herramientas
+            self.toggleEnableToolbarIcons(True)
+        
     def runConsulta(self):
         """ Run method for Busqueda Dialog """
         self.whichDialog = "Consulta"
