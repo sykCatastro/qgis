@@ -959,18 +959,18 @@ class SGC:
                 if "id_padre" in item and f.attribute("id") == item["id_padre"] and len(id_padres) < 2:
                     tiene_padre = True
                     intersect_area = f.geometry().intersection(feature.geometry()).area()
-                    if intersect_area < area_feature - tolerancia_feature_hija:
+                    if str(self.dataET["tramite"]["objeto"]) not in ['Adjudicación de partida inmobiliaria'] and intersect_area < area_feature - tolerancia_feature_hija:
                         errores_verificacion.append(f"El objeto geométrico seleccionado no se encuentra contenido en el objeto padre o se encuentra fuera de su contenedor en más de un {self.dataET['parametros']['TOLERANCIA_CONTENEDOR']}%")  
                 # Que no se superpongan en un determinado margen (tolerancia) a otros objetos del mismo tipo
                 if layer["fisico"].find(item["tipo"]) != -1 and  f.attribute("anidacion") == item["anidacion"] and not se_superpone:
                     intersect_area = f.geometry().intersection(feature.geometry()).area()
                     tolerancia_feature_sup_2 = f.geometry().area() * float(self.dataET["parametros"]["TOLERANCIA_SUPERPOSICION"]) / 100
-                    if intersect_area > tolerancia_feature_sup or intersect_area > tolerancia_feature_sup_2:
+                    if str(self.dataET["tramite"]["objeto"]) not in ['Adjudicación de partida inmobiliaria'] and intersect_area > tolerancia_feature_sup or intersect_area > tolerancia_feature_sup_2:
                         errores_verificacion.append(f"El objeto geométrico seleccionado se superpone a otro del mismo tipo y jerarquía en más de un {self.dataET['parametros']['TOLERANCIA_SUPERPOSICION']}%")  
                         se_superpone = True
 
-        # Que tenga objeto grafico padre (necesario para calcular contenedor) salvo que sea prescripcion
-        if str(self.dataET["tramite"]["objeto"]) != 'Mensura Para Prescripción Adquisitiva' and item["anidacion"] > 0 and not tiene_padre:
+        # Que tenga objeto grafico padre (necesario para calcular contenedor) salvo que sea prescripcion adquisitiva, reputacion y de division
+        if str(self.dataET["tramite"]["objeto"]) not in ['Mensura Para Prescripción Adquisitiva', 'Mensura Para Prescripción Adquisitiva y División', 'Mensura para reputacion de dominio'] and item["anidacion"] > 0 and not tiene_padre:
             errores_verificacion.append("Se debe asociar el objeto gráfico padre primero")
         # Que no exceda de la superficie detallada en el registro
         if (item["superficie"] is not None) and ((area_feature < float(item["superficie"]) - tolerancia_feature_area) or (area_feature > float(item["superficie"]) + tolerancia_feature_area)):
@@ -1279,7 +1279,7 @@ class SGC:
                     parent = [p for p in parents if p.data()["id"] == c["id_padre"]][0]
                 elif c["id_padre"] in [p.data()["id"] for p in children]:
                     parent = [p for p in children if p.data()["id"] == c["id_padre"]][0]
-                elif str(self.dataET["tramite"]["objeto"]) == 'Mensura Para Prescripción Adquisitiva':
+                elif str(self.dataET["tramite"]["objeto"]) in ['Mensura Para Prescripción Adquisitiva', 'Mensura Para Prescripción Adquisitiva y División', 'Mensura para reputacion de dominio']:
                     parents.append(QStandardItem(QIcon(os.path.join(self.current_dir,'icons/cancel.png')), 'PARCELAS SIN ORIGEN'))
                     parents[-1].setData({"id": c["id_padre"],
                                  "asociada": False,
