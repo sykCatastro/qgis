@@ -926,9 +926,9 @@ class SGC:
         layers = [l for l in self.layers if l["fisico"] is not None and l["fisico"].find("TEMPORAL:") != -1]
         errores_verificacion = []
         area_feature = feature.geometry().area()
-        tolerancia_feature_hija = area_feature * float(self.dataET["parametros"]["TOLERANCIA_CONTENEDOR"]) / 100
-        tolerancia_feature_area = (float(item['superficie']) * float(self.dataET["parametros"]["TOLERANCIA_SUPERFICIE"]) / 100) if item["superficie"] is not None else None
-        tolerancia_feature_sup = area_feature * float(self.dataET["parametros"]["TOLERANCIA_SUPERPOSICION"]) / 100
+        tolerancia_feature_hija = area_feature * 5.0 / 100 # Se establece por software por precaucion 
+        tolerancia_feature_area = (float(item['superficie']) * 5.0 / 100) if item["superficie"] is not None else None # Se establece por software por precaucion 
+        tolerancia_feature_sup = area_feature * 0 / 100  # Se establece por software por precaucion 
         tiene_padre = False
         se_superpone = False
 
@@ -949,8 +949,9 @@ class SGC:
                 fusion_geom = fusion_geom.combine(p)
             tiene_padre = True
             intersect_area = fusion_geom.intersection(feature.geometry()).area()
-            if intersect_area < area_feature - tolerancia_feature_hija:
-                errores_verificacion.append(f"El objeto geométrico seleccionado no se encuentra contenido en el objeto padre o se encuentra fuera de su contenedor en más de un {self.dataET['parametros']['TOLERANCIA_CONTENEDOR']}%")  
+            print(str(self.dataET["tramite"]["subtipo"]))
+            if str(self.dataET["tramite"]["subtipo"]) not in ['Prescripción parcial sobre mas de una parcela'] and intersect_area < area_feature - tolerancia_feature_hija:
+                errores_verificacion.append(f"El objeto geométrico seleccionado no se encuentra contenido en el objeto padre o se encuentra fuera de su contenedor en más de un {5.0}%")  
         for layer in layers:
             # Objeto contenido padre SIMPLE
             # +
@@ -959,20 +960,23 @@ class SGC:
                 if "id_padre" in item and f.attribute("id") == item["id_padre"] and len(id_padres) < 2:
                     tiene_padre = True
                     intersect_area = f.geometry().intersection(feature.geometry()).area()
-                    if str(self.dataET["tramite"]["objeto"]) not in ['Adjudicación de partida inmobiliaria'] and intersect_area < area_feature - tolerancia_feature_hija:
-                        errores_verificacion.append(f"El objeto geométrico seleccionado no se encuentra contenido en el objeto padre o se encuentra fuera de su contenedor en más de un {self.dataET['parametros']['TOLERANCIA_CONTENEDOR']}%")  
+                    print(str(self.dataET["tramite"]["subtipo"]))
+                    if str(self.dataET["tramite"]["objeto"]) not in ['Adjudicación de partida inmobiliaria', 'Desglose'] and str(self.dataET["tramite"]["subtipo"]) not in ['Prescripción parcial sobre mas de una parcela'] and intersect_area < area_feature - tolerancia_feature_hija:
+                        errores_verificacion.append(f"El objeto geométrico seleccionado no se encuentra contenido en el objeto padre o se encuentra fuera de su contenedor en más de un {5.0}%")  
                 # Que no se superpongan en un determinado margen (tolerancia) a otros objetos del mismo tipo
                 if layer["fisico"].find(item["tipo"]) != -1 and  f.attribute("anidacion") == item["anidacion"] and not se_superpone:
                     intersect_area = f.geometry().intersection(feature.geometry()).area()
-                    tolerancia_feature_sup_2 = f.geometry().area() * float(self.dataET["parametros"]["TOLERANCIA_SUPERPOSICION"]) / 100
-                    if str(self.dataET["tramite"]["objeto"]) not in ['Adjudicación de partida inmobiliaria'] and intersect_area > tolerancia_feature_sup or intersect_area > tolerancia_feature_sup_2:
-                        errores_verificacion.append(f"El objeto geométrico seleccionado se superpone a otro del mismo tipo y jerarquía en más de un {self.dataET['parametros']['TOLERANCIA_SUPERPOSICION']}%")  
+                    tolerancia_feature_sup_2 = f.geometry().area() * 0.0 / 100
+                    print(str(self.dataET["tramite"]["subtipo"]))
+                    if str(self.dataET["tramite"]["objeto"]) not in ['Adjudicación de partida inmobiliaria', 'Desglose'] and intersect_area > tolerancia_feature_sup or intersect_area > tolerancia_feature_sup_2:
+                        errores_verificacion.append(f"El objeto geométrico seleccionado se superpone a otro del mismo tipo y jerarquía")  
                         se_superpone = True
 
         # Que tenga objeto grafico padre (necesario para calcular contenedor) salvo que sea prescripcion adquisitiva, reputacion y de division
         if str(self.dataET["tramite"]["objeto"]) not in ['Mensura Para Prescripción Adquisitiva', 'Mensura Para Prescripción Adquisitiva y División', 'Mensura para reputacion de dominio'] and item["anidacion"] > 0 and not tiene_padre:
             errores_verificacion.append("Se debe asociar el objeto gráfico padre primero")
         # Que no exceda de la superficie detallada en el registro
+
         if (item["superficie"] is not None) and ((area_feature < float(item["superficie"]) - tolerancia_feature_area) or (area_feature > float(item["superficie"]) + tolerancia_feature_area)):
             errores_verificacion.append(f"La diferencia entre la superficie del objeto seleccionado y la superficie registrada excede un {self.dataET['parametros']['TOLERANCIA_SUPERFICIE']}%. (Superficie del objeto seleccionado: {'%.2f' % area_feature}m². Registrado: {'%.2f' % float(item['superficie'])}m²)")
         
@@ -1600,7 +1604,7 @@ class SGC:
         QMessageBox.information(self.dlgEOG, "Éxito", f"Geometría {'asociada' if asociar else 'desasociada'} con éxito.\n\nEl buscador puede demorar unos minutos en actualizarse.")
         if asociar: # Borrar objeto de capa de dibujo
             capa = item['capa']
-            if capa in ["VW_PARCELAS_GRAF_ALFA_RURALES", "VW_PARCELAS_PRESCRIPCIONES", "VW_PARCELAS_PH"]: # Fix for VW_PARCELAS_GRAF_ALFA_RURALES PRESCRIPCIONES PH
+            if capa in ["VW_PARCELAS_GRAF_ALFA_RURALES", "VW_PARCELAS_PRESCRIPCIONES", "VW_PARCELA_PH", "VW_UNIDADES_PARCELARIAS"]: # Fix 
                 capa = "VW_PARCELAS_GRAF_ALFA"
             featureLayer = [l["obj"] for l in self.layers if l["fisico"] == f"DIBUJO:{capa}"][0]
             featureLayer.deleteFeatures([feature.id()])
@@ -1612,7 +1616,7 @@ class SGC:
             reply = message.exec()
             if reply == QMessageBox.Yes:
                 capa = item['capa']
-                if capa in ["VW_PARCELAS_GRAF_ALFA_RURALES", "VW_PARCELAS_PRESCRIPCIONES", "VW_PARCELAS_PH"]: # Fix for VW_PARCELAS_GRAF_ALFA_RURALES  PRESCRIPCIONES PH
+                if capa in ["VW_PARCELAS_GRAF_ALFA_RURALES", "VW_PARCELAS_PRESCRIPCIONES", "VW_PARCELA_PH", "VW_UNIDADES_PARCELARIAS"]: # Fix 
                     capa = "VW_PARCELAS_GRAF_ALFA"
                 featureLayer = [l["obj"] for l in self.layers if l["fisico"] == f"DIBUJO:{capa}"][0]
                 new_dibujo_feature = QgsFeature()
