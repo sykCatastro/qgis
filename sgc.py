@@ -688,6 +688,7 @@ class SGC:
         canvas.setMapTool(self.mapTool)
         self.mapTool.found_feats.connect(self.featureSelected)
         self.featSelDlg = True # Allow to abort selection with Esc key
+        
 
     def featureSelected(self, features):
         """ Trigger event for the selection of a polygon/feature in current layer """
@@ -928,7 +929,7 @@ class SGC:
         area_feature = feature.geometry().area()
         tolerancia_feature_hija = area_feature * 5.0 / 100 # Se establece por software por precaucion 
         tolerancia_feature_area = (float(item['superficie']) * 5.0 / 100) if item["superficie"] is not None else None # Se establece por software por precaucion 
-        tolerancia_feature_sup = area_feature * 0 / 100  # Se establece por software por precaucion 
+        tolerancia_feature_sup = area_feature * 0.00001 / 100  # Se establece por software por precaucion y se ha determinado que 0.00001% es el error propio de la herramienta
         tiene_padre = False
         se_superpone = False
 
@@ -951,7 +952,47 @@ class SGC:
             intersect_area = fusion_geom.intersection(feature.geometry()).area()
             print(str(self.dataET["tramite"]["subtipo"]))
             if str(self.dataET["tramite"]["subtipo"]) not in ['Prescripción parcial sobre mas de una parcela'] and intersect_area < area_feature - tolerancia_feature_hija:
-                errores_verificacion.append(f"El objeto geométrico seleccionado no se encuentra contenido en el objeto padre o se encuentra fuera de su contenedor en más de un {5.0}%")  
+                errores_verificacion.append(f"El objeto geométrico seleccionado no se encuentra contenido en el objeto padre o se encuentra fuera de un contenedor o manzana en más de un {5.0}%")  
+        # Validación adicional de que el objeto está contenido en "VW_MANZANAS"
+        layer_manzanas = [lay["obj"] for lay in self.layers if lay["fisico"] == "VW_MANZANAS"]
+
+        if not layer_manzanas:
+            errores_verificacion.append("El objeto geométrico seleccionado no se encuentra contenido dentro de una manzana.")
+        else:
+            print("Cargando geometrías de 'VW_MANZANAS'...")  # Debugging line
+            feature_geom = feature.geometry()
+            
+            # Crear una caja de búsqueda alrededor del objeto
+            search_rect = feature_geom.boundingBox()
+            search_geom = QgsGeometry.fromRect(search_rect)  # Convertir a QgsGeometry
+            search_geom = search_geom.buffer(10, 1)  # Ajusta el valor de 10 según sea necesario
+            
+            # Buscar características dentro de la caja de búsqueda
+            request = QgsFeatureRequest().setFilterRect(search_geom.boundingBox())
+            
+            manzana_geom = []
+            for f in layer_manzanas[0].getFeatures(request):
+                manzana_geom.append(f.geometry())
+            
+            if not manzana_geom:
+                errores_verificacion.append("El objeto geométrico seleccionado no se encuentra contenido dentro de una manzana.")
+            else:
+                print(f"Geometrías cargadas: {len(manzana_geom)}")  # Debugging line
+                
+                # Combinación de geometrías
+                fusion_manzanas_geom = manzana_geom[0]
+                for m in manzana_geom[1:]:
+                    fusion_manzanas_geom = fusion_manzanas_geom.combine(m)
+                
+                # Verificar si la geometría combinada es válida
+                if fusion_manzanas_geom.isEmpty():
+                    errores_verificacion.append("El objeto geométrico seleccionado no se encuentra contenido dentro de una manzana.")
+                else:
+                    intersect_area_manzanas = fusion_manzanas_geom.intersection(feature.geometry()).area()
+                    print(f"Área de intersección con la manzana: {intersect_area_manzanas}")  # Debugging line
+                    if intersect_area_manzanas < area_feature - tolerancia_feature_hija:
+                        errores_verificacion.append("El objeto geométrico seleccionado no se encuentra contenido dentro de una manzana.")
+
         for layer in layers:
             # Objeto contenido padre SIMPLE
             # +
@@ -962,18 +1003,18 @@ class SGC:
                     intersect_area = f.geometry().intersection(feature.geometry()).area()
                     print(str(self.dataET["tramite"]["subtipo"]))
                     if str(self.dataET["tramite"]["objeto"]) not in ['Adjudicación de partida inmobiliaria', 'Desglose'] and str(self.dataET["tramite"]["subtipo"]) not in ['Prescripción parcial sobre mas de una parcela'] and intersect_area < area_feature - tolerancia_feature_hija:
-                        errores_verificacion.append(f"El objeto geométrico seleccionado no se encuentra contenido en el objeto padre o se encuentra fuera de su contenedor en más de un {5.0}%")  
+                        errores_verificacion.append(f"El objeto geométrico seleccionado no se encuentra contenido en el objeto padre o se encuentra fuera de su contenedor o manzana en más de un {5.0}%")  
                 # Que no se superpongan en un determinado margen (tolerancia) a otros objetos del mismo tipo
                 if layer["fisico"].find(item["tipo"]) != -1 and  f.attribute("anidacion") == item["anidacion"] and not se_superpone:
                     intersect_area = f.geometry().intersection(feature.geometry()).area()
-                    tolerancia_feature_sup_2 = f.geometry().area() * 0.0 / 100
+                    tolerancia_feature_sup_2 = f.geometry().area() * 0.00001 / 100
                     print(str(self.dataET["tramite"]["subtipo"]))
                     if str(self.dataET["tramite"]["objeto"]) not in ['Adjudicación de partida inmobiliaria', 'Desglose'] and intersect_area > tolerancia_feature_sup or intersect_area > tolerancia_feature_sup_2:
                         errores_verificacion.append(f"El objeto geométrico seleccionado se superpone a otro del mismo tipo y jerarquía")  
                         se_superpone = True
 
         # Que tenga objeto grafico padre (necesario para calcular contenedor) salvo que sea prescripcion adquisitiva, reputacion y de division
-        if str(self.dataET["tramite"]["objeto"]) not in ['Mensura Para Prescripción Adquisitiva', 'Mensura Para Prescripción Adquisitiva y División', 'Mensura para reputacion de dominio'] and item["anidacion"] > 0 and not tiene_padre:
+        if str(self.dataET["tramite"]["objeto"]) not in ['Mensura Para Prescripción Adquisitiva', 'Mensura Para Prescripción Adquisitiva y División', 'Mensura para reputacion de dominio', 'Mensura para reputacion de dominio y división'] and item["anidacion"] > 0 and not tiene_padre:
             errores_verificacion.append("Se debe asociar el objeto gráfico padre primero")
         # Que no exceda de la superficie detallada en el registro
 
@@ -1283,7 +1324,7 @@ class SGC:
                     parent = [p for p in parents if p.data()["id"] == c["id_padre"]][0]
                 elif c["id_padre"] in [p.data()["id"] for p in children]:
                     parent = [p for p in children if p.data()["id"] == c["id_padre"]][0]
-                elif str(self.dataET["tramite"]["objeto"]) in ['Mensura Para Prescripción Adquisitiva', 'Mensura Para Prescripción Adquisitiva y División', 'Mensura para reputacion de dominio']:
+                elif str(self.dataET["tramite"]["objeto"]) in ['Mensura Para Prescripción Adquisitiva', 'Mensura Para Prescripción Adquisitiva y División', 'Mensura para reputacion de dominio', 'Mensura para reputacion de dominio y división']:
                     parents.append(QStandardItem(QIcon(os.path.join(self.current_dir,'icons/cancel.png')), 'PARCELAS SIN ORIGEN'))
                     parents[-1].setData({"id": c["id_padre"],
                                  "asociada": False,
@@ -1660,7 +1701,7 @@ class SGC:
     def EOGasociarGeometria(self):
         item = self.dlgEOG.resultsTable.currentItem().data(32)
         capa = item['capa']
-        if capa in ["VW_PARCELAS_GRAF_ALFA_RURALES", "VW_PARCELAS_PRESCRIPCIONES", "VW_PARCELAS_PH"]: # Fix for VW_PARCELAS_GRAF_ALFA_RURALES y PRESCRIPCIONES
+        if capa in ["VW_PARCELAS_GRAF_ALFA_RURALES", "VW_PARCELAS_PRESCRIPCIONES", "VW_PARCELA_PH"]: # Fix for VW_PARCELAS_GRAF_ALFA_RURALES y PRESCRIPCIONES
             capa = "VW_PARCELAS_GRAF_ALFA"
         self.selectMapFeatureByClick(capa = f"DIBUJO:{capa}")
 
