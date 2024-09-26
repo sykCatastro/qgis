@@ -956,9 +956,7 @@ class SGC:
         # Validación adicional de que el objeto está contenido en "VW_MANZANAS"
         layer_manzanas = [lay["obj"] for lay in self.layers if lay["fisico"] == "VW_MANZANAS"]
 
-        if not layer_manzanas:
-            errores_verificacion.append("El objeto geométrico seleccionado no se encuentra contenido dentro de una manzana.")
-        else:
+        if layer_manzanas and item.get('capa', "VW_PARCELAS_GRAF_ALFA_RURALES") not in ["VW_PARCELAS_GRAF_ALFA_RURALES"]:
             print("Cargando geometrías de 'VW_MANZANAS'...")  # Debugging line
             feature_geom = feature.geometry()
             
@@ -1696,17 +1694,78 @@ class SGC:
 
 
     def EOGdesasociarGeometria(self):
-        self.EOGupdateGeometria(asociar = False)
-
-    def EOGasociarGeometria(self):
+        print("Iniciando desasociación...")
+        
+        # Obtener el ítem seleccionado y la capa
         item = self.dlgEOG.resultsTable.currentItem().data(32)
         capa = item['capa']
-        if capa in ["VW_PARCELAS_GRAF_ALFA_RURALES", "VW_PARCELAS_PRESCRIPCIONES", "VW_PARCELA_PH"]: # Fix for VW_PARCELAS_GRAF_ALFA_RURALES y PRESCRIPCIONES
+        if capa in ["VW_PARCELAS_GRAF_ALFA_RURALES", "VW_PARCELAS_PRESCRIPCIONES", "VW_PARCELA_PH"]:
             capa = "VW_PARCELAS_GRAF_ALFA"
-        self.selectMapFeatureByClick(capa = f"DIBUJO:{capa}")
+        
+        print(f"Usando capa: {capa}")
+        
+        # Seleccionar feature en el mapa
+        self.selectMapFeatureForDesasociar(capa)
+    
+    def selectMapFeatureForDesasociar(self, capa=""):
+        search_layers = []
+        for l in self.layers:
+            if l["fisico"] == capa or l["fisico"] in ["vw_parcelas_sanear"]:
+                search_layers.append(l["obj"])
+        
+        self.minimizeDialog(self.whichDialog)
 
+        self.selectFeatureMsg = QgsMessageBarItem(
+            "Seleccione un objeto de la capa correspondiente para desasociar, haciendo click con el mouse. Tecla ESC para cancelar.",
+            level=Qgis.Info, duration=0
+        )
+        self.iface.messageBar().pushItem(self.selectFeatureMsg)
+        
+        # Conectar la herramienta de selección de características del mapa
+        canvas = self.iface.mapCanvas()
+        self.mapTool = self.IdentifyTool(canvas, search_layers)
+        canvas.setMapTool(self.mapTool)
+        self.mapTool.found_feats.connect(self.featureSelectedForDesasociar)
+        self.featSelDlg = True  # Permitir abortar la selección con la tecla Esc
+    
+    def featureSelectedForDesasociar(self, features):
+        """ Manejar el evento de selección de un feature en la capa actual para desasociar """
+        if not features:
+            print("No se seleccionó ninguna geometría.")
+            return
+
+        # Obtener el ítem seleccionado para acceder a los featids
+        item = self.dlgEOG.resultsTable.currentItem().data(32)
+        featids = item['featids']  # Obtener todos los featids del ítem seleccionado
+
+        print(f"Feats disponibles para desasociar: {featids}")
+        cantidad = len(features)
+        print(f"Cantidad de features seleccionados: {cantidad}")
+
+        # Iterar sobre los features seleccionados
+        for feature in features:
+            # Obtener el featid del feature seleccionado
+            feature_featid = feature.attribute('featid')
+
+            # Asegúrate de que el featid sea un entero para la comparación
+            if feature_featid is not None:
+                feature_featid = int(feature_featid)
+
+                # Verificar si el featid está en la lista de featids
+                if feature_featid in featids:
+                    self.abortFeatureSelect()
+                    self.EOGupdateGeometria(asociar=False, feature=feature)
+                    return
+        
     def EOGupdateGeometria(self, asociar = True, feature = None):
         item = self.dlgEOG.resultsTable.currentItem().data(32)
+        print(f"Datos del ítem seleccionado: {item}")
+        if feature is not None:
+            try:
+                feature_featid = feature.attribute('featid')
+                print(f"Feature seleccionado: {int(feature_featid)}")
+            except:
+                print(f"Feature sin featid")
         message = QMessageBox(QMessageBox.Question, f"{'Asociación' if asociar else 'Desasociación'} de geometría", 
             f"¿Está seguro de que desea {'asociar la geometría elegida al' if asociar else 'desasociar la geometría del'} objeto seleccionado?"
             f"\nObjeto seleccionado: \nTipo: {item['tipo']}\nNombre: {item['nombre']}\nDescripción: {item['descripcion']}",
@@ -1714,15 +1773,26 @@ class SGC:
         message.buttons()[0].setText("Si") 
         reply = message.exec()
         if reply == QMessageBox.Yes:
+            print(f"Usuario confirmó {'asociar' if asociar else 'desasociar'} geometría.")
+            if item.get("featids", False):
+                item["featids"] = [int(feature_featid)]
             item["geometry"] = feature.geometry().asWkt() if asociar else "NULL"
             item["dato_tienegeom"] = "TRUE" if asociar else "FALSE"
             item["hostname"] = platform.uname()[1]
             self.waitMsg = self.messageWait("Espere mientras se procesa el cambio...")
             thread = self.ServerLoaderUpdateGeometryEOG(self, item, asociar)
+            print(f"Iniciando hilo para {'asociar' if asociar else 'desasociar'} geometría.")
             thread.finished.connect(lambda: self.finishedUpdateGeometryEOG(feature))
             thread.failed.connect(self.failedUpdateGeometryEOT)
             thread.start() 
 
+    def EOGasociarGeometria(self):
+            item = self.dlgEOG.resultsTable.currentItem().data(32)
+            capa = item['capa']
+            if capa in ["VW_PARCELAS_GRAF_ALFA_RURALES", "VW_PARCELAS_PRESCRIPCIONES", "VW_PARCELA_PH"]: # Fix for VW_PARCELAS_GRAF_ALFA_RURALES y PRESCRIPCIONES
+                capa = "VW_PARCELAS_GRAF_ALFA"
+            self.selectMapFeatureByClick(capa = f"DIBUJO:{capa}")
+    
     def buttonsToggleABM(self,asociar = False, desasociar = False):
         self.dlgEOG.buttonAsociar.setEnabled(asociar)
         self.dlgEOG.buttonDesasociar.setEnabled(desasociar)
