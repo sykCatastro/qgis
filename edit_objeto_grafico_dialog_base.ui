@@ -191,6 +191,11 @@
      <string>Descripción</string>
     </property>
    </column>
+   <column>
+    <property name="text">
+     <string>Gráfico</string>
+    </property>
+   </column>
   </widget>
   <widget class="QLabel" name="labelResultados">
    <property name="geometry">

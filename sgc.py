@@ -915,7 +915,7 @@ class SGC:
                     n.setExpanded(False)
 
     # Bandeja Tramites
-    def featureAsociadaET(self,feature):
+    def featureAsociadaET(self, feature):
         
         item = self.dlgET.entradasTree.model().itemFromIndex(self.dlgET.entradasTree.selectionModel().selectedIndexes()[0]).data()
         
@@ -927,22 +927,22 @@ class SGC:
         layers = [l for l in self.layers if l["fisico"] is not None and l["fisico"].find("TEMPORAL:") != -1]
         errores_verificacion = []
         area_feature = feature.geometry().area()
-        tolerancia_feature_hija = area_feature * 5.0 / 100 # Se establece por software por precaucion 
-        tolerancia_feature_area = (float(item['superficie']) * 5.0 / 100) if item["superficie"] is not None else None # Se establece por software por precaucion 
+        print(f"Área del feature: {area_feature}")  # Debugging line
+        tolerancia_feature_hija = area_feature * 5.0 / 100  # Se establece por software por precaucion
+        print(f"Tolerancia para el feature hija: {tolerancia_feature_hija}")  # Debugging line
+        tolerancia_feature_area = (float(item['superficie']) * 5.0 / 100) if item["superficie"] is not None else None  # Se establece por software por precaucion
         tolerancia_feature_sup = area_feature * 0.00001 / 100  # Se establece por software por precaucion y se ha determinado que 0.00001% es el error propio de la herramienta
         tiene_padre = False
         se_superpone = False
 
-        # Objeto contenido padre  COMPUESTO
-        # +
-        # Que no exceda los limites de su contenedor hasta un determinado margen de tolerancia
+        # Objeto contenido padre COMPUESTO
         if len(id_padres) > 1:
             padre_geom = []
             tipo_layer_padre = [p["tipo"] for p in self.dataET["entradas"] if p["id"] == id_padres[0]][0]
             nombre_layer_padre = "TEMPORAL:PARCELAS" if tipo_layer_padre in ["PARCELA COMUN"] else "TEMPORAL:MANZANAS"
             layer_padre = [lay["obj"] for lay in self.layers if lay["fisico"] == nombre_layer_padre][0]
             for id in id_padres:
-                feature_iterator = layer_padre.getFeatures( QgsFeatureRequest( QgsExpression( f"\"id\"={id}")))
+                feature_iterator = layer_padre.getFeatures(QgsFeatureRequest(QgsExpression(f"\"id\"={id}")))
                 for f in feature_iterator:
                     padre_geom.append(f.geometry())
             fusion_geom = padre_geom[0]
@@ -950,13 +950,47 @@ class SGC:
                 fusion_geom = fusion_geom.combine(p)
             tiene_padre = True
             intersect_area = fusion_geom.intersection(feature.geometry()).area()
-            print(str(self.dataET["tramite"]["subtipo"]))
+            print(f"Área de intersección con el padre: {intersect_area}")  # Debugging line
             if str(self.dataET["tramite"]["subtipo"]) not in ['Prescripción parcial sobre mas de una parcela'] and intersect_area < area_feature - tolerancia_feature_hija:
-                errores_verificacion.append(f"El objeto geométrico seleccionado no se encuentra contenido en el objeto padre o se encuentra fuera de un contenedor o manzana en más de un {5.0}%")  
+                errores_verificacion.append(f"El objeto geométrico seleccionado no se encuentra contenido en el objeto padre o se encuentra fuera de un contenedor o manzana en más de un {5.0}%")
+
+        # Crear lista de geometrías de las capas de parcelas
+        layer_parcelas = [lay["obj"] for lay in self.layers if lay["fisico"] in ["VW_PARCELAS_GRAF_ALFA", "VW_PARCELAS_GRAF_ALFA_RURALES"]]
+        if layer_parcelas:
+            print("Cargando geometrías de PARCELAS...")  # Debugging line
+            feature_geoms = feature.geometry()
+            
+            # Crear una caja de búsqueda alrededor del objeto
+            search_rects = feature_geoms.boundingBox()
+            search_geoms = QgsGeometry.fromRect(search_rects).buffer(10, 1)  # Ajusta el buffer según sea necesario
+            
+            # Buscar características dentro de la caja de búsqueda
+            request = QgsFeatureRequest().setFilterRect(search_geoms.boundingBox())
+            parcela_geom = []
+
+            for layer in layer_parcelas:  # Iterar por las capas disponibles
+                for f in layer.getFeatures(request):
+                    parcela_geom.append(f.geometry())
+            
+            # Validar superposición con las parcelas
+            if parcela_geom:
+                print("Validando superposición con parcelas...")  # Debugging line
+                fusion_parcelas_geom = parcela_geom[0]
+                for p in parcela_geom[1:]:
+                    fusion_parcelas_geom = fusion_parcelas_geom.combine(p)
+                
+                if not fusion_parcelas_geom.isEmpty():
+                    intersect_area_parcelas = fusion_parcelas_geom.intersection(feature.geometry()).area()
+                    print(f"Área de intersección con parcelas: {intersect_area_parcelas}")  # Debugging line
+                    if intersect_area_parcelas > 0.00001:  # Se encuentra superposición
+                        errores_verificacion.append("El objeto geométrico seleccionado se superpone a otro del mismo tipo y jerarquía.")
+            else:
+                print("No se encontraron geometrías de parcelas en la búsqueda.")  # Debugging line
+
         # Validación adicional de que el objeto está contenido en "VW_MANZANAS"
         layer_manzanas = [lay["obj"] for lay in self.layers if lay["fisico"] == "VW_MANZANAS"]
-
-        if layer_manzanas and item.get('capa', "VW_PARCELAS_GRAF_ALFA_RURALES") not in ["VW_PARCELAS_GRAF_ALFA_RURALES"]:
+        capa = item.get('tabla', "").strip()  # Se asegura que 'capa' sea una cadena vacía si no existe
+        if layer_manzanas and capa not in ["VW_PARCELAS_GRAF_ALFA_RURALES"]:
             print("Cargando geometrías de 'VW_MANZANAS'...")  # Debugging line
             feature_geom = feature.geometry()
             
@@ -975,7 +1009,7 @@ class SGC:
             if not manzana_geom:
                 errores_verificacion.append("El objeto geométrico seleccionado no se encuentra contenido dentro de una manzana.")
             else:
-                print(f"Geometrías cargadas: {len(manzana_geom)}")  # Debugging line
+                print(f"Geometrías cargadas de 'VW_MANZANAS': {len(manzana_geom)}")  # Debugging line
                 
                 # Combinación de geometrías
                 fusion_manzanas_geom = manzana_geom[0]
@@ -991,38 +1025,37 @@ class SGC:
                     if intersect_area_manzanas < area_feature - tolerancia_feature_hija:
                         errores_verificacion.append("El objeto geométrico seleccionado no se encuentra contenido dentro de una manzana.")
 
+        # Validar lo mismo ya dentro del trámite 
         for layer in layers:
             # Objeto contenido padre SIMPLE
-            # +
-            # Que no exceda los limites de su contenedor hasta un determinado margen de tolerancia
             for f in layer["obj"].getFeatures():
                 if "id_padre" in item and f.attribute("id") == item["id_padre"] and len(id_padres) < 2:
                     tiene_padre = True
                     intersect_area = f.geometry().intersection(feature.geometry()).area()
-                    print(str(self.dataET["tramite"]["subtipo"]))
+                    print(f"Área de intersección con el objeto padre SIMPLE: {intersect_area}")  # Debugging line
                     if str(self.dataET["tramite"]["objeto"]) not in ['Adjudicación de partida inmobiliaria', 'Desglose'] and str(self.dataET["tramite"]["subtipo"]) not in ['Prescripción parcial sobre mas de una parcela'] and intersect_area < area_feature - tolerancia_feature_hija:
-                        errores_verificacion.append(f"El objeto geométrico seleccionado no se encuentra contenido en el objeto padre o se encuentra fuera de su contenedor o manzana en más de un {5.0}%")  
+                        errores_verificacion.append(f"El objeto geométrico seleccionado no se encuentra contenido en el objeto padre o se encuentra fuera de su contenedor o manzana en más de un {5.0}%")
                 # Que no se superpongan en un determinado margen (tolerancia) a otros objetos del mismo tipo
-                if layer["fisico"].find(item["tipo"]) != -1 and  f.attribute("anidacion") == item["anidacion"] and not se_superpone:
+                if layer["fisico"].find(item["tipo"]) != -1 and f.attribute("anidacion") == item["anidacion"] and not se_superpone:
                     intersect_area = f.geometry().intersection(feature.geometry()).area()
                     tolerancia_feature_sup_2 = f.geometry().area() * 0.00001 / 100
-                    print(str(self.dataET["tramite"]["subtipo"]))
+                    print(f"Área de intersección con otro objeto del mismo tipo: {intersect_area}")  # Debugging line
                     if str(self.dataET["tramite"]["objeto"]) not in ['Adjudicación de partida inmobiliaria', 'Desglose'] and intersect_area > tolerancia_feature_sup or intersect_area > tolerancia_feature_sup_2:
-                        errores_verificacion.append(f"El objeto geométrico seleccionado se superpone a otro del mismo tipo y jerarquía")  
+                        errores_verificacion.append(f"El objeto geométrico seleccionado se superpone a otro de la misma jerarquía")
                         se_superpone = True
 
         # Que tenga objeto grafico padre (necesario para calcular contenedor) salvo que sea prescripcion adquisitiva, reputacion y de division
-        if str(self.dataET["tramite"]["objeto"]) not in ['Mensura Para Prescripción Adquisitiva', 'Mensura Para Prescripción Adquisitiva y División', 'Mensura para reputacion de dominio', 'Mensura para reputacion de dominio y división'] and item["anidacion"] > 0 and not tiene_padre:
+        if str(self.dataET["tramite"]["objeto"]) not in ['Mensura Para Prescripción Adquisitiva', 'Mensura Para Prescripción Adquisitiva y División', 'Mensura para reputacion de dominio', 'Mensura para reputacion de dominio y división', 'Mensura Para Prescripción Administrativa Ley N° 24320'] and item["anidacion"] > 0 and not tiene_padre:
             errores_verificacion.append("Se debe asociar el objeto gráfico padre primero")
-        # Que no exceda de la superficie detallada en el registro
 
+        # Que no exceda de la superficie detallada en el registro
         if (item["superficie"] is not None) and ((area_feature < float(item["superficie"]) - tolerancia_feature_area) or (area_feature > float(item["superficie"]) + tolerancia_feature_area)):
             errores_verificacion.append(f"La diferencia entre la superficie del objeto seleccionado y la superficie registrada excede un {self.dataET['parametros']['TOLERANCIA_SUPERFICIE']}%. (Superficie del objeto seleccionado: {'%.2f' % area_feature}m². Registrado: {'%.2f' % float(item['superficie'])}m²)")
-        
+
         if len(errores_verificacion) == 0:
             geometry = feature.geometry().asWkt()
             try:
-                r = requests.put(url = self.URL + "geometria_temporal", data = json.dumps([{"id": item["id"],"featid": item["featid"],"tabla": item["tabla_grafica"],"geometry": geometry,"id_parcela": item["id_objeto"], "id_tramite": self.dataET["tramite"]["id_tramite"]}]), 
+                r = requests.put(url=self.URL + "geometria_temporal", data=json.dumps([{"id": item["id"], "featid": item["featid"], "tabla": item["tabla_grafica"], "geometry": geometry, "id_parcela": item["id_objeto"], "id_tramite": self.dataET["tramite"]["id_tramite"]}]),
                                  headers={'Authorization': "Bearer {}".format(self.TOKEN)})
                 if r.status_code == 200:
                     self.loadTramiteLayerGroup(True)
@@ -1038,8 +1071,8 @@ class SGC:
                 logging.warning("Error en servidor")
                 QMessageBox.warning(self.dlgET, "Error", "Servidor no disponible")
             except (KeyboardInterrupt, SystemExit): raise
-            except: 
-                logging.warning("ERROR : " + str(sys.exc_info()[0]) + str(sys.exc_info()[1])  + str(sys.exc_info()[2]) + "Line: " + str(sys.exc_info()[2].tb_lineno))
+            except:
+                logging.warning("ERROR : " + str(sys.exc_info()[0]) + str(sys.exc_info()[1]) + str(sys.exc_info()[2]) + "Line: " + str(sys.exc_info()[2].tb_lineno))
                 QMessageBox.warning(self.dlgET, "Error", "Error en servidor")
         else:
             errores_parrafo = ""
@@ -1322,7 +1355,7 @@ class SGC:
                     parent = [p for p in parents if p.data()["id"] == c["id_padre"]][0]
                 elif c["id_padre"] in [p.data()["id"] for p in children]:
                     parent = [p for p in children if p.data()["id"] == c["id_padre"]][0]
-                elif str(self.dataET["tramite"]["objeto"]) in ['Mensura Para Prescripción Adquisitiva', 'Mensura Para Prescripción Adquisitiva y División', 'Mensura para reputacion de dominio', 'Mensura para reputacion de dominio y división']:
+                elif str(self.dataET["tramite"]["objeto"]) in ['Mensura Para Prescripción Adquisitiva', 'Mensura Para Prescripción Adquisitiva y División', 'Mensura para reputacion de dominio', 'Mensura para reputacion de dominio y división', 'Mensura Para Prescripción Administrativa Ley N° 24320']:
                     parents.append(QStandardItem(QIcon(os.path.join(self.current_dir,'icons/cancel.png')), 'PARCELAS SIN ORIGEN'))
                     parents[-1].setData({"id": c["id_padre"],
                                  "asociada": False,
@@ -1522,46 +1555,123 @@ class SGC:
             QMessageBox.warning(self.iface.mainWindow(), "Error", "Servidor no disponible.")
 
     def performConsulta(self):
+        mostrados = 0
         self.dlgC.resultsTable.clearSelection()
         self.dlgC.resultsTable.setRowCount(0)
         self.dlgC.labelNoEncontrado.setVisible(False)
         self.dlgC.labelResultados.setVisible(False)
-        # if self.dlgC.lineSearch.text() != "":
+
         try:
-            r = requests.get(url = self.URL + "search", data = json.dumps({"search_terms": self.dlgC.lineSearch.text(),"tipo": self.dlgC.comboObjeto.currentText().lower()}),
-                             headers={'Authorization': "Bearer {}".format(self.TOKEN)})
+            # Realiza la solicitud al servidor
+            r = requests.get(url=self.URL + "search", 
+                            data=json.dumps({"search_terms": self.dlgC.lineSearch.text(), 
+                                            "tipo": self.dlgC.comboObjeto.currentText().lower()}),
+                            headers={'Authorization': "Bearer {}".format(self.TOKEN)})
+
             if r and r.status_code == 200:
-                logging.info("Succesful search request")
+                logging.info("Successful search request")
                 total_docs = int(r.json()["response"]["numFound"])
                 docs = r.json()["response"]["docs"]
                 rows = int(r.json()["responseHeader"]["params"]["rows"])
-                #docs.sort(key=lambda f: f['nombre'],reverse=False)
+
                 if len(docs) > 0:
+                    # Ajustar el tamaño de la ventana según los resultados
                     self.dlgC.setMaximumSize(self.defaultSizeC)
                     self.dlgC.setMinimumSize(self.defaultSizeC)
                     self.dlgC.resize(self.defaultSizeC)
 
                     for d in docs:
-                        d['dato_tienegeom'] = d['dato_tienegeom'] == "TRUE"
-                        d['descripcion'] = re.sub(r'<br>', "\n", d['descripcion'])
-                        self.dlgC.resultsTable.insertRow(self.dlgC.resultsTable.rowCount())
-                        items = []
-                        items.append(QTableWidgetItem(QIcon(os.path.join(self.current_dir,'icons/ok.png')) if d['dato_tienegeom'] else QIcon(os.path.join(self.current_dir,'icons/cancel.png')),""))
-                        items.append(QTableWidgetItem(f"{d['nombre'] if 'nombre' in d else ''}{'-' if 'nombre' in d and 'dato_nomenclatura' in d else ''}{d['dato_nomenclatura'] if 'dato_nomenclatura' in d else ''}"))
-                        items.append(QTableWidgetItem(d['descripcion']))
-                        for i in range(3):
-                            font = items[i].font()
-                            font.setPointSize(10)
-                            items[i].setFont(font)
-                            items[i].setFlags(Qt.ItemIsEnabled|Qt.ItemIsSelectable)
-                            items[i].setData(32,d)
-                            self.dlgC.resultsTable.setItem(self.dlgC.resultsTable.rowCount() - 1,i,items[i])
-                    if len(docs) == 1:
-                        self.consultaItemClicked(items[0], no_error_message = True)
+                        # Manejo del objeto dependiendo del tipo
+                        if self.dlgC.comboObjeto.currentText().lower() not in ['parcelas', 'prescripciones']:
+                            d['dato_tienegeom'] = d['dato_tienegeom'] == "TRUE"
+                            d['descripcion'] = re.sub(r'<br>', "\n", d['descripcion'])
+
+                            # Verifica si hay featids
+                            featids_value = d['featids'] if 'featids' in d else ['']
+
+                            # Repite la fila por cada featid
+                            for featid in featids_value:
+                                self.dlgC.resultsTable.insertRow(self.dlgC.resultsTable.rowCount())
+                                items = []
+
+                                # Crear las columnas de la tabla
+                                item_icon = QTableWidgetItem(QIcon(os.path.join(self.current_dir, 'icons/ok.png')) if d['dato_tienegeom'] else QIcon(os.path.join(self.current_dir, 'icons/cancel.png')), "")
+                                item_nombre = QTableWidgetItem(f"{d['nombre'] if 'nombre' in d else ''}{'-' if 'nombre' in d and 'dato_nomenclatura' in d else ''}{d['dato_nomenclatura'] if 'dato_nomenclatura' in d else ''}")
+                                item_descripcion = QTableWidgetItem(d['descripcion'])
+                                item_featid = QTableWidgetItem(str(featid))
+
+                                # Añadir los items a la lista
+                                items.append(item_icon)
+                                items.append(item_nombre)
+                                items.append(item_descripcion)
+                                items.append(item_featid)
+
+                                mostrados += 1
+
+                                # Aplicar formato y asociar los datos
+                                for i in range(4):
+                                    font = items[i].font()
+                                    font.setPointSize(10)
+                                    items[i].setFont(font)
+                                    items[i].setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+                                    items[i].setData(32, d)
+
+                                    # Añadir el item a la tabla
+                                    self.dlgC.resultsTable.setItem(self.dlgC.resultsTable.rowCount() - 1, i, items[i])
+
+                        else:
+                            # Manejo especial para parcelas y prescripciones
+                            if str(d['descripcion'])[str(d['descripcion']).find('Superficie') + 12: str(d['descripcion']).find('Superficie') + 15] > '0 m2':
+                                d['dato_tienegeom'] = d['dato_tienegeom'] == "TRUE"
+                                d['descripcion'] = re.sub(r'<br>', "\n", d['descripcion'])
+
+                                # Verifica si hay featids
+                                featids_value = d['featids'] if 'featids' in d else ['']
+
+                                # Repite la fila por cada featid
+                                for featid in featids_value:
+                                    self.dlgC.resultsTable.insertRow(self.dlgC.resultsTable.rowCount())
+                                    items = []
+
+                                    # Crear las columnas de la tabla
+                                    item_icon = QTableWidgetItem(QIcon(os.path.join(self.current_dir, 'icons/ok.png')) if d['dato_tienegeom'] else QIcon(os.path.join(self.current_dir, 'icons/cancel.png')), "")
+                                    item_nombre = QTableWidgetItem(f"{d['nombre'] if 'nombre' in d else ''}{'-' if 'nombre' in d and 'dato_nomenclatura' in d else ''}{d['dato_nomenclatura'] if 'dato_nomenclatura' in d else ''}")
+                                    item_descripcion = QTableWidgetItem(d['descripcion'])
+                                    item_featid = QTableWidgetItem(str(featid))
+
+                                    # Añadir los items a la lista
+                                    items.append(item_icon)
+                                    items.append(item_nombre)
+                                    items.append(item_descripcion)
+                                    items.append(item_featid)
+
+                                    mostrados += 1
+
+                                    # Aplicar formato y asociar los datos
+                                    for i in range(4):
+                                        font = items[i].font()
+                                        font.setPointSize(10)
+                                        items[i].setFont(font)
+                                        items[i].setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+                                        items[i].setData(32, d)
+
+                                        # Añadir el item a la tabla
+                                        self.dlgC.resultsTable.setItem(self.dlgC.resultsTable.rowCount() - 1, i, items[i])
+
+                    # Mostrar resultados adicionales si hay más documentos
                     if total_docs > rows:
                         self.dlgC.labelResultados.setVisible(True)
-                        self.dlgC.labelResultados.setText(f"Mostrando {len(docs)} de {total_docs} resultados.\nPara mejor precisión, ajuste el filtro ingresado.")
+                        self.dlgC.labelResultados.setText(f"Mostrando {mostrados} de {total_docs} resultados. Para una mejor precisión, ajuste el filtro ingresado.")
+                    if len(docs) == 1 and self.dlgC.comboObjeto.currentText().lower() != 'parcelas':
+                        self.consultaItemClicked(items[0], no_error_message=True)
+                    if len(docs) == 1 and self.dlgC.comboObjeto.currentText().lower() == 'parcelas':
+                        if str(d['descripcion'])[str(d['descripcion']).find('Superficie') + 12: str(d['descripcion']).find('Superficie') + 15] in ['0 m2', '0 ha']:
+                            self.dlgC.labelNoEncontrado.setVisible(True)
+                            self.dlgC.labelResultados.setVisible(False)
+                        else:
+                            self.consultaItemClicked(items[0], no_error_message=True)
                 else:
+                    # Ajustar el tamaño si no hay resultados
                     self.dlgC.setMaximumSize(self.smallerSizeC)
                     self.dlgC.setMinimumSize(self.smallerSizeC)
                     self.dlgC.resize(self.smallerSizeC)
@@ -1573,60 +1683,119 @@ class SGC:
         except requests.exceptions.ConnectionError:
             logging.info("Error en servidor")
             QMessageBox.warning(self.dlgC, "Error", "Servidor no disponible")
-        except (KeyboardInterrupt, SystemExit): raise
+        except (KeyboardInterrupt, SystemExit):
+            raise
         except:
             logging.warning("Error en busqueda: " + str(sys.exc_info()[0]) + str(sys.exc_info()[1]))
             QMessageBox.warning(self.dlgC, "Error", "Error en busqueda")
 
-    def consultaItemClicked(self,item, no_error_message = False):
+
+    def consultaItemClicked(self, item, no_error_message=False):
         try:
             dialog = self.dlgEOG if self.whichDialog == "EditObjetoGrafico" else (self.dlgC if self.whichDialog == "Consulta" else self.iface.mainWindow())
-            r = requests.get(url = self.URL + "objeto_geometry", data = json.dumps(item.data(32)),
-                             headers={'Authorization': "Bearer {}".format(self.TOKEN)})
+
+            # Hacer la consulta al servidor para obtener la geometría
+            r = requests.get(url=self.URL + "objeto_geometry", data=json.dumps(item.data(32)),
+                            headers={'Authorization': "Bearer {}".format(self.TOKEN)})
+
             if r and r.status_code == 200 and r.json()["x"] is not None and r.json()["y"] is not None:
                 logging.info("Succesful Geometry Query")
-                # Deselect all features from all layers
+
+                # Deseleccionar todas las entidades de todas las capas
                 for l in [l["obj"] for l in self.layers if l["tipo"] != "oms"]:
                     l.removeSelection()
-                layerData = [l for l in self.layers if  "tabla" in l and l["tabla"] == item.data(32)["capa"]][0]
+
+                # Obtener la capa correspondiente al item
+                layerData = [l for l in self.layers if "tabla" in l and l["tabla"] == item.data(32)["capa"]][0]
                 layer = layerData["obj"]
-                layerTreeObj  = QgsProject.instance().layerTreeRoot().findLayer(layer)
+
+                # Asegurar que la capa esté visible
+                layerTreeObj = QgsProject.instance().layerTreeRoot().findLayer(layer)
                 layerTreeObj.setItemVisibilityChecked(True)
+
+                # Obtener la geometría del resultado
                 geometry = r.json()
                 canvas = self.iface.mapCanvas()
-                scale = 32500
                 mapPoint = QgsPointXY(geometry["x"], geometry["y"])
 
+                # Calcular el rectángulo de selección si hay un envelope
                 if "envelope" in geometry:
                     envelope = geometry["envelope"]
-                    env_points = re.split(",| ",re.search('(?<=^POLYGON\\(\\().+(?=\\)\\))', envelope).group(0))
+                    env_points = re.split(",| ", re.search(r'(?<=^POLYGON\(\().+(?=\)\))', envelope).group(0))
                     x_extent = abs(float(env_points[0]) - float(env_points[4]))
                     y_extent = abs(float(env_points[1]) - float(env_points[5]))
-                    rect = QgsRectangle(mapPoint.x() - x_extent * 1.3, mapPoint.y() - y_extent * 1.3, mapPoint.x() + x_extent  * 1.3, mapPoint.y() + y_extent * 1.3)
+                    rect = QgsRectangle(mapPoint.x() - x_extent * 1.3, mapPoint.y() - y_extent * 1.3,
+                                        mapPoint.x() + x_extent * 1.3, mapPoint.y() + y_extent * 1.3)
                 else:
-                    rect = QgsRectangle(mapPoint.x() - scale, mapPoint.y() - scale, mapPoint.x() + scale, mapPoint.y() + scale)
+                    scale = 32500
+                    rect = QgsRectangle(mapPoint.x() - scale, mapPoint.y() - scale,
+                                        mapPoint.x() + scale, mapPoint.y() + scale)
 
-                def select():
-                    canvas.mapCanvasRefreshed.disconnect(select)
-                    screenPoint = QgsMapTool(canvas).toCanvasCoordinates(mapPoint)
-                    feature_selection = QgsMapToolIdentify(canvas).identify(screenPoint.x(),screenPoint.y(),[layer],QgsMapToolIdentify.DefaultQgsSetting) if item.data(32)["capa"] != "VW_LOCALIDAD_GRAFICA" else []
-                    if len(feature_selection) > 0:
-                        layer.select(feature_selection[0].mFeature.id())
+                # Obtener featids asociados al item
+                featids = item.data(32).get('featids', [])
 
-                canvas.mapCanvasRefreshed.connect(select)
+                if len(featids) == 1:
+                    # Optimización para un solo featid (versión más rápida)
+                    def select_single():
+                        canvas.mapCanvasRefreshed.disconnect(select_single)
+                        screenPoint = QgsMapTool(canvas).toCanvasCoordinates(mapPoint)
+                        feature_selection = QgsMapToolIdentify(canvas).identify(screenPoint.x(), screenPoint.y(),
+                                                                            [layer], QgsMapToolIdentify.DefaultQgsSetting)
+                        if len(feature_selection) > 0:
+                            layer.select(feature_selection[0].mFeature.id())
+
+                    canvas.mapCanvasRefreshed.connect(select_single)
+
+                elif len(featids) > 1:
+                    # Lógica para seleccionar múltiples featids (más robusta pero más lenta)
+                    def select_multiple():
+                        canvas.mapCanvasRefreshed.disconnect(select_multiple)
+                        # Seleccionar todas las entidades que coincidan con los featids
+                        for featid in featids:
+                            expr = QgsExpression(f'"featid" = {featid}')  # Ajustar según el nombre de campo
+                            it = layer.getFeatures(QgsFeatureRequest(expr))
+                            for feature in it:
+                                layer.select(feature.id())
+
+                    # Conectar la selección al refresco del canvas
+                    canvas.mapCanvasRefreshed.connect(select_multiple)
+
+                    # Ajustar el rectángulo para hacer un "zoom out" cuando hay múltiples featids
+                    if "envelope" in geometry:
+                        # Ajustar el rectángulo para un zoom out basado en el número de featids
+                        zoom_out_factor = 1.3 + (len(featids) * 0.1)  # Incrementa el factor basado en la cantidad de featids
+                        rect = QgsRectangle(mapPoint.x() - x_extent * zoom_out_factor,
+                                            mapPoint.y() - y_extent * zoom_out_factor,
+                                            mapPoint.x() + x_extent * zoom_out_factor,
+                                            mapPoint.y() + y_extent * zoom_out_factor)
+                    else:
+                        scale = 32500 * (1 + len(featids) * 0.1)  # Incrementar el zoom según el número de featids
+                        rect = QgsRectangle(mapPoint.x() - scale, mapPoint.y() - scale,
+                                            mapPoint.x() + scale, mapPoint.y() + scale)
+                else:
+                    logging.warning("No featids found in item")
+
+                # Ajustar el canvas al rectángulo calculado
                 canvas.setExtent(rect)
                 canvas.refresh()
+
             else:
                 logging.warning("Error en query geometria: " + r.text)
                 if not no_error_message:
                     QMessageBox.warning(dialog, "Error", "El objeto seleccionado no posee geometría")
+
         except requests.exceptions.ConnectionError:
             logging.info("Error en servidor")
             QMessageBox.warning(dialog, "Error", "Servidor no disponible")
-        except (KeyboardInterrupt, SystemExit): raise
+
+        except (KeyboardInterrupt, SystemExit):
+            raise
+
         except:
             logging.warning("Error en query geometria: " + str(sys.exc_info()[0]) + str(sys.exc_info()[1]) + "Line: " + str(sys.exc_info()[2].tb_lineno))
             QMessageBox.warning(dialog, "Error", "El objeto seleccionado no posee geometría")
+
+
 
 
     def consultaComboChanged(self):
@@ -1699,7 +1868,7 @@ class SGC:
         # Obtener el ítem seleccionado y la capa
         item = self.dlgEOG.resultsTable.currentItem().data(32)
         capa = item['capa']
-        if capa in ["VW_PARCELAS_GRAF_ALFA_RURALES", "VW_PARCELAS_PRESCRIPCIONES", "VW_PARCELA_PH"]:
+        if capa in ["VW_PARCELA_PH"]:
             capa = "VW_PARCELAS_GRAF_ALFA"
         
         print(f"Usando capa: {capa}")
@@ -1716,7 +1885,7 @@ class SGC:
         self.minimizeDialog(self.whichDialog)
 
         self.selectFeatureMsg = QgsMessageBarItem(
-            "Seleccione un objeto de la capa correspondiente para desasociar, haciendo click con el mouse. Tecla ESC para cancelar.",
+            "Seleccione un objeto de la capa correspondiente para desasociar, haciendo click con el mouse. Cuando lo haga, espere un momento dicho proceso. Tecla ESC para cancelar",
             level=Qgis.Info, duration=0
         )
         self.iface.messageBar().pushItem(self.selectFeatureMsg)
@@ -1809,61 +1978,103 @@ class SGC:
         self.dlgEOG.labelResultados.setVisible(False)
         self.buttonsToggleABM()
         try:
-            r = requests.get(url = self.URL + "search_ABM", data = json.dumps({"search_terms": self.dlgEOG.lineBuscar.text(),"tipo": self.dlgEOG.comboObjeto.currentText().lower()}),
-                             headers={'Authorization': "Bearer {}".format(self.TOKEN)})
+            r = requests.get(url=self.URL + "search_ABM", data=json.dumps({"search_terms": self.dlgEOG.lineBuscar.text(), "tipo": self.dlgEOG.comboObjeto.currentText().lower()}),
+                            headers={'Authorization': "Bearer {}".format(self.TOKEN)})
             if r and r.status_code == 200:
-                logging.info("Succesful search request")
+                logging.info("Successful search request")
                 total_docs = int(r.json()["response"]["numFound"])
                 docs = r.json()["response"]["docs"]
                 rows = int(r.json()["responseHeader"]["params"]["rows"])
-                #docs.sort(key=lambda f: f['nombre'],reverse=False)
                 if len(docs) > 0:
                     for d in docs:
-                        items = []
-                        if self.dlgEOG.comboObjeto.currentText().lower() != 'parcelas' and self.dlgEOG.comboObjeto.currentText().lower() != 'prescripciones':
+                        # Manejo del objeto dependiendo del tipo
+                        if self.dlgEOG.comboObjeto.currentText().lower() not in ['parcelas', 'prescripciones']:
                             d['dato_tienegeom'] = d['dato_tienegeom'] == "TRUE"
                             d['descripcion'] = re.sub(r'<br>', "\n", d['descripcion'])
-                            self.dlgEOG.resultsTable.insertRow(self.dlgEOG.resultsTable.rowCount())
-                            items.append(QTableWidgetItem(QIcon(os.path.join(self.current_dir,'icons/ok.png')) if d['dato_tienegeom'] else QIcon(os.path.join(self.current_dir,'icons/cancel.png')),""))
-                            items.append(QTableWidgetItem(f"{d['nombre'] if 'nombre' in d else ''}{'-' if 'nombre' in d and 'dato_nomenclatura' in d else ''}{d['dato_nomenclatura'] if 'dato_nomenclatura' in d else ''}"))
-                            items.append(QTableWidgetItem(d['descripcion']))
-                            mostrados+=1
-                            for i in range(3):
-                                font = items[i].font()
-                                font.setPointSize(10)
-                                items[i].setFont(font)
-                                items[i].setFlags(Qt.ItemIsEnabled|Qt.ItemIsSelectable)
-                                #items[i].setData(32,{"id": d["id"], "tipo": d["tipo"], "tabla": d["capa"], "nombre": d["nombre"],"tabla_padre": d['dato_tablapadre'],"id_padre": d['idpadre'] if 'idpadre' in d else None,"geometry": d['dato_tienegeom']})
-                                items[i].setData(32,d)
-                                self.dlgEOG.resultsTable.setItem(self.dlgEOG.resultsTable.rowCount() - 1,i,items[i])
-                        else:
-                            if str(d['descripcion'])[str(d['descripcion']).find('Superficie')+12: str(d['descripcion']).find('Superficie')+15] > '0 m2':
-                                d['dato_tienegeom'] = d['dato_tienegeom'] == "TRUE"
-                                d['descripcion'] = re.sub(r'<br>', "\n", d['descripcion'])
+
+                            # Verifica si hay featids
+                            featids_value = d['featids'] if 'featids' in d else ['']  # Si no hay featids, crea una lista vacía
+
+                            # Repite la fila por cada featid
+                            for featid in featids_value:
                                 self.dlgEOG.resultsTable.insertRow(self.dlgEOG.resultsTable.rowCount())
-                                items.append(QTableWidgetItem(QIcon(os.path.join(self.current_dir,'icons/ok.png')) if d['dato_tienegeom'] else QIcon(os.path.join(self.current_dir,'icons/cancel.png')),""))
-                                items.append(QTableWidgetItem(f"{d['nombre'] if 'nombre' in d else ''}{'-' if 'nombre' in d and 'dato_nomenclatura' in d else ''}{d['dato_nomenclatura'] if 'dato_nomenclatura' in d else ''}"))
-                                items.append(QTableWidgetItem(d['descripcion']))
-                                mostrados+=1
-                                for i in range(3):
+                                items = []
+
+                                # Crear nuevas instancias de QTableWidgetItem para cada columna
+                                item_icon = QTableWidgetItem(QIcon(os.path.join(self.current_dir, 'icons/ok.png')) if d['dato_tienegeom'] else QIcon(os.path.join(self.current_dir, 'icons/cancel.png')), "")
+                                item_nombre = QTableWidgetItem(f"{d['nombre'] if 'nombre' in d else ''}{'-' if 'nombre' in d and 'dato_nomenclatura' in d else ''}{d['dato_nomenclatura'] if 'dato_nomenclatura' in d else ''}")
+                                item_descripcion = QTableWidgetItem(d['descripcion'])
+                                item_featid = QTableWidgetItem(str(featid))
+
+                                # Añadir los items a la lista de items
+                                items.append(item_icon)
+                                items.append(item_nombre)
+                                items.append(item_descripcion)
+                                items.append(item_featid)
+
+                                mostrados += 1
+
+                                # Aplicar formato y asociar los datos para cada item
+                                for i in range(4):  # Aumenta el rango para incluir featids
                                     font = items[i].font()
                                     font.setPointSize(10)
                                     items[i].setFont(font)
-                                    items[i].setFlags(Qt.ItemIsEnabled|Qt.ItemIsSelectable)
-                                    #items[i].setData(32,{"id": d["id"], "tipo": d["tipo"], "tabla": d["capa"], "nombre": d["nombre"],"tabla_padre": d['dato_tablapadre'],"id_padre": d['idpadre'] if 'idpadre' in d else None,"geometry": d['dato_tienegeom']})
-                                    items[i].setData(32,d)
-                                    self.dlgEOG.resultsTable.setItem(self.dlgEOG.resultsTable.rowCount() - 1,i,items[i])
+                                    items[i].setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+                                    items[i].setData(32, d)  # Asegurarse de que cada item tenga los datos asociados
+
+                                    # Añadir el item a la tabla
+                                    self.dlgEOG.resultsTable.setItem(self.dlgEOG.resultsTable.rowCount() - 1, i, items[i])
+
+                        else:
+                            # Manejo para parcelas y prescripciones
+                            if str(d['descripcion'])[str(d['descripcion']).find('Superficie') + 12: str(d['descripcion']).find('Superficie') + 15] > '0 m2':
+                                d['dato_tienegeom'] = d['dato_tienegeom'] == "TRUE"
+                                d['descripcion'] = re.sub(r'<br>', "\n", d['descripcion'])
+
+                                # Verifica si hay featids
+                                featids_value = d['featids'] if 'featids' in d else ['']  # Si no hay featids, crea una lista vacía
+
+                                # Repite la fila por cada featid
+                                for featid in featids_value:
+                                    self.dlgEOG.resultsTable.insertRow(self.dlgEOG.resultsTable.rowCount())
+                                    items = []
+
+                                    # Crear nuevas instancias de QTableWidgetItem para cada columna
+                                    item_icon = QTableWidgetItem(QIcon(os.path.join(self.current_dir, 'icons/ok.png')) if d['dato_tienegeom'] else QIcon(os.path.join(self.current_dir, 'icons/cancel.png')), "")
+                                    item_nombre = QTableWidgetItem(f"{d['nombre'] if 'nombre' in d else ''}{'-' if 'nombre' in d and 'dato_nomenclatura' in d else ''}{d['dato_nomenclatura'] if 'dato_nomenclatura' in d else ''}")
+                                    item_descripcion = QTableWidgetItem(d['descripcion'])
+                                    item_featid = QTableWidgetItem(str(featid))
+
+                                    # Añadir los items a la lista de items
+                                    items.append(item_icon)
+                                    items.append(item_nombre)
+                                    items.append(item_descripcion)
+                                    items.append(item_featid)
+
+                                    mostrados += 1
+
+                                    # Aplicar formato y asociar los datos para cada item
+                                    for i in range(4):  # Aumenta el rango para incluir featids
+                                        font = items[i].font()
+                                        font.setPointSize(10)
+                                        items[i].setFont(font)
+                                        items[i].setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+                                        items[i].setData(32, d)  # Asegurarse de que cada item tenga los datos asociados
+
+                                        # Añadir el item a la tabla
+                                        self.dlgEOG.resultsTable.setItem(self.dlgEOG.resultsTable.rowCount() - 1, i, items[i])
+
                     if total_docs > rows:
                         self.dlgEOG.labelResultados.setVisible(True)
-                        self.dlgEOG.labelResultados.setText(f"Mostrando {mostrados} de {total_docs-(len(docs)-mostrados)} resultados. Para una mejor precisión , ajuste el filtro ingresado.")
+                        self.dlgEOG.labelResultados.setText(f"Mostrando {mostrados} de {total_docs - (len(docs) - mostrados)} resultados. Para una mejor precisión, ajuste el filtro ingresado.")
                     if len(docs) == 1 and self.dlgEOG.comboObjeto.currentText().lower() != 'parcelas':
-                        self.consultaItemClicked(items[0], no_error_message = True)
+                        self.consultaItemClicked(items[0], no_error_message=True)
                     if len(docs) == 1 and self.dlgEOG.comboObjeto.currentText().lower() == 'parcelas':
-                        if str(d['descripcion'])[str(d['descripcion']).find('Superficie')+12: str(d['descripcion']).find('Superficie')+15] in ['0 m2', '0 ha']:
+                        if str(d['descripcion'])[str(d['descripcion']).find('Superficie') + 12: str(d['descripcion']).find('Superficie') + 15] in ['0 m2', '0 ha']:
                             self.dlgEOG.labelNoEncontrado.setVisible(True)
                             self.dlgEOG.labelResultados.setVisible(False)
                         else:
-                            self.consultaItemClicked(items[0], no_error_message = True)
+                            self.consultaItemClicked(items[0], no_error_message=True)
                 else:
                     self.dlgEOG.labelNoEncontrado.setVisible(True)
                     self.dlgEOG.labelResultados.setVisible(False)
@@ -1873,10 +2084,11 @@ class SGC:
         except requests.exceptions.ConnectionError:
             logging.info("Error en servidor")
             QMessageBox.warning(self.dlgEOG, "Error", "Servidor no disponible")
-        except (KeyboardInterrupt, SystemExit): raise
+        except (KeyboardInterrupt, SystemExit):
+            raise
         except:
             logging.warning("Error en busqueda: " + str(sys.exc_info()[0]) + str(sys.exc_info()[1]))
-            QMessageBox.warning(self.dlgEOG, "Error", "No se pueden asociar o desasociar parcelas sin superficie")
+            QMessageBox.warning(self.dlgEOG, "Error", "No se pueden asociar o desasociar parcelas sin superficie") 
 
     """
         RUN METHODS

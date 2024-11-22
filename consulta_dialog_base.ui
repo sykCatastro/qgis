@@ -166,6 +166,11 @@ Para mejor precisión , ajuste el filtro ingresado.</string>
      <string>Descripción</string>
     </property>
    </column>
+   <column>
+    <property name="text">
+     <string>Gráfico</string>
+    </property>
+   </column>
   </widget>
  </widget>
  <resources/>
