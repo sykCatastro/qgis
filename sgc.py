@@ -954,9 +954,10 @@ class SGC:
             if str(self.dataET["tramite"]["subtipo"]) not in ['Prescripción parcial sobre mas de una parcela'] and intersect_area < area_feature - tolerancia_feature_hija:
                 errores_verificacion.append(f"El objeto geométrico seleccionado no se encuentra contenido en el objeto padre o se encuentra fuera de un contenedor o manzana en más de un {5.0}%")
 
+        capa = item.get('tabla', "").strip()  # Se asegura que 'capa' sea una cadena vacía si no existe
         # Crear lista de geometrías de las capas de parcelas
         layer_parcelas = [lay["obj"] for lay in self.layers if lay["fisico"] in ["VW_PARCELAS_GRAF_ALFA", "VW_PARCELAS_GRAF_ALFA_RURALES"]]
-        if layer_parcelas:
+        if layer_parcelas and capa not in ["VW_PARCELAS_PRESCRIPCIONES"]:
             print("Cargando geometrías de PARCELAS...")  # Debugging line
             feature_geoms = feature.geometry()
             
@@ -989,8 +990,8 @@ class SGC:
 
         # Validación adicional de que el objeto está contenido en "VW_MANZANAS"
         layer_manzanas = [lay["obj"] for lay in self.layers if lay["fisico"] == "VW_MANZANAS"]
-        capa = item.get('tabla', "").strip()  # Se asegura que 'capa' sea una cadena vacía si no existe
-        if layer_manzanas and capa not in ["VW_PARCELAS_GRAF_ALFA_RURALES"]:
+        
+        if layer_manzanas and capa not in ["VW_PARCELAS_GRAF_ALFA_RURALES", "VW_PARCELAS_PRESCRIPCIONES"]:
             print("Cargando geometrías de 'VW_MANZANAS'...")  # Debugging line
             feature_geom = feature.geometry()
             
@@ -1026,23 +1027,24 @@ class SGC:
                         errores_verificacion.append("El objeto geométrico seleccionado no se encuentra contenido dentro de una manzana.")
 
         # Validar lo mismo ya dentro del trámite 
-        for layer in layers:
-            # Objeto contenido padre SIMPLE
-            for f in layer["obj"].getFeatures():
-                if "id_padre" in item and f.attribute("id") == item["id_padre"] and len(id_padres) < 2:
-                    tiene_padre = True
-                    intersect_area = f.geometry().intersection(feature.geometry()).area()
-                    print(f"Área de intersección con el objeto padre SIMPLE: {intersect_area}")  # Debugging line
-                    if str(self.dataET["tramite"]["objeto"]) not in ['Adjudicación de partida inmobiliaria', 'Desglose'] and str(self.dataET["tramite"]["subtipo"]) not in ['Prescripción parcial sobre mas de una parcela'] and intersect_area < area_feature - tolerancia_feature_hija:
-                        errores_verificacion.append(f"El objeto geométrico seleccionado no se encuentra contenido en el objeto padre o se encuentra fuera de su contenedor o manzana en más de un {5.0}%")
-                # Que no se superpongan en un determinado margen (tolerancia) a otros objetos del mismo tipo
-                if layer["fisico"].find(item["tipo"]) != -1 and f.attribute("anidacion") == item["anidacion"] and not se_superpone:
-                    intersect_area = f.geometry().intersection(feature.geometry()).area()
-                    tolerancia_feature_sup_2 = f.geometry().area() * 0.00001 / 100
-                    print(f"Área de intersección con otro objeto del mismo tipo: {intersect_area}")  # Debugging line
-                    if str(self.dataET["tramite"]["objeto"]) not in ['Adjudicación de partida inmobiliaria', 'Desglose'] and intersect_area > tolerancia_feature_sup or intersect_area > tolerancia_feature_sup_2:
-                        errores_verificacion.append(f"El objeto geométrico seleccionado se superpone a otro de la misma jerarquía")
-                        se_superpone = True
+        if capa not in ["VW_PARCELAS_PRESCRIPCIONES"]:
+            for layer in layers:
+                # Objeto contenido padre SIMPLE
+                for f in layer["obj"].getFeatures():
+                    if "id_padre" in item and f.attribute("id") == item["id_padre"] and len(id_padres) < 2:
+                        tiene_padre = True
+                        intersect_area = f.geometry().intersection(feature.geometry()).area()
+                        print(f"Área de intersección con el objeto padre SIMPLE: {intersect_area}")  # Debugging line
+                        if str(self.dataET["tramite"]["objeto"]) not in ['Adjudicación de partida inmobiliaria', 'Desglose'] and str(self.dataET["tramite"]["subtipo"]) not in ['Prescripción parcial sobre mas de una parcela'] and intersect_area < area_feature - tolerancia_feature_hija:
+                            errores_verificacion.append(f"El objeto geométrico seleccionado no se encuentra contenido en el objeto padre o se encuentra fuera de su contenedor o manzana en más de un {5.0}%")
+                    # Que no se superpongan en un determinado margen (tolerancia) a otros objetos del mismo tipo
+                    if layer["fisico"].find(item["tipo"]) != -1 and f.attribute("anidacion") == item["anidacion"] and not se_superpone:
+                        intersect_area = f.geometry().intersection(feature.geometry()).area()
+                        tolerancia_feature_sup_2 = f.geometry().area() * 0.00001 / 100
+                        print(f"Área de intersección con otro objeto del mismo tipo: {intersect_area}")  # Debugging line
+                        if str(self.dataET["tramite"]["objeto"]) not in ['Adjudicación de partida inmobiliaria', 'Desglose'] and intersect_area > tolerancia_feature_sup or intersect_area > tolerancia_feature_sup_2:
+                            errores_verificacion.append(f"El objeto geométrico seleccionado se superpone a otro de la misma jerarquía")
+                            se_superpone = True
 
         # Que tenga objeto grafico padre (necesario para calcular contenedor) salvo que sea prescripcion adquisitiva, reputacion y de division
         if str(self.dataET["tramite"]["objeto"]) not in ['Mensura Para Prescripción Adquisitiva', 'Mensura Para Prescripción Adquisitiva y División', 'Mensura para reputacion de dominio', 'Mensura para reputacion de dominio y división', 'Mensura Para Prescripción Administrativa Ley N° 24320'] and item["anidacion"] > 0 and not tiene_padre:
