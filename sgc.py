@@ -28,6 +28,7 @@ from qgis.PyQt.QtXml import *
 from qgis.core import *
 from qgis.gui import QgsMapToolIdentify, QgsLayerTreeView, QgsMessageBarItem, QgsMapToolEmitPoint, QgsMapTool, QgsMapToolIdentifyFeature
 from PyQt5.QtCore import QAbstractTableModel, QVariant, Qt, QDateTime, QStringListModel, QSortFilterProxyModel, QEvent, QMetaMethod
+from PyQt5.QtWidgets import QDesktopWidget, QMessageBox, QHeaderView
 from datetime import date, datetime
 from pathlib import Path
 import requests, re, hashlib, json, logging.config, time, math, copy, os.path, sys, base64, platform, glob
@@ -969,7 +970,8 @@ class SGC:
         else:
             tiene_mismo_id = False  
         print('Tienen el mismo ID: ', tiene_mismo_id)
-        print('S')
+        print('Elementos del item')
+        print(item)
         # Crear lista de geometrías de las capas de parcelas
         layer_parcelas = [lay["obj"] for lay in self.layers if lay["fisico"] in ["VW_PARCELAS_GRAF_ALFA", "VW_PARCELAS_GRAF_ALFA_RURALES"]]
         if layer_parcelas and str(self.dataET["tramite"]["objeto"]) not in ['División en Base a Mensura Registrada Para Prescripción adquisitiva', 'Mensura Para Prescripción Adquisitiva y División', 'Mensura Para Prescripción Adquisitiva', 'Mensura Para Prescripción Administrativa Ley N 24320']:
@@ -1091,7 +1093,6 @@ class SGC:
                 errores_verificacion.append(f"La diferencia entre la superficie del objeto seleccionado y la superficie registrada excede un {self.dataET['parametros']['TOLERANCIA_SUPERFICIE']}%. (Superficie del objeto seleccionado: {'%.2f' % area_feature}m². Registrado: {'%.2f' % float(item['superficie'])}m²)")
 
         print('Superficie registrada: ', item['superficie'])
-        
         # Ticket S314 - Validación referente a jurisdiccion y parcela a asociar 
         # Obtener la capa 'JURISDICCIONES'
         
@@ -1132,7 +1133,6 @@ class SGC:
                     errores_verificacion.append(f"La jurisdicción de la partida seleccionada ({jur_tramite}) no corresponde a la ubicación del gráfico ({jur_codigo} - {jur_nombre})")
         else:
             print("No se encontró jurisdicción para esta geometría.")
-        
         if len(errores_verificacion) == 0:
             geometry = feature.geometry().asWkt()
             try:
@@ -1220,7 +1220,6 @@ class SGC:
             # Set Name
             self.tramiteGroupString = f"Tramite Nº: {self.dataET['tramite']['id_tramite']}"
             group.setName(self.tramiteGroupString)
-    
             # Add layers
             for l in [l for l in self.dataLayers["layers"] if l["grupo"] == group_id]:
                 qgis_layers = QgsProject.instance().mapLayers().keys() # Save previous list of loaded layers
@@ -1243,8 +1242,7 @@ class SGC:
                                     "tipo": "oms" if l["tipo"] == 0 else "", 
                                     "fisico": l["nombre_fisico"],
                                     "obj": new_layer,
-                                    "default_visible": l["visible"]})       
-                
+                                    "default_visible": l["visible"]})
         else:
             root = QgsProject.instance().layerTreeRoot()
             group = root.findGroup(self.tramiteGroupString)
@@ -1327,7 +1325,12 @@ class SGC:
             self.dlgET.setMaximumSize(self.dlgET.size())
             self.dlgET.setMinimumSize(self.dlgET.size())
             self.defaultSizeET = self.dlgET.size()
-            self.dlgET.setGeometry((QDesktopWidget().screenGeometry().width() / 2) - (self.defaultSizeET.width() / 2),(QDesktopWidget().screenGeometry().height() / 2) - (self.defaultSizeET.height() / 2),self.defaultSizeET.width(),self.defaultSizeET.height())
+            self.dlgET.setGeometry(
+                int((QDesktopWidget().screenGeometry().width() / 2) - (self.defaultSizeET.width() / 2)),
+                int((QDesktopWidget().screenGeometry().height() / 2) - (self.defaultSizeET.height() / 2)),
+                self.defaultSizeET.width(),
+                self.defaultSizeET.height()
+            )
             # Table config
             self.dlgET.tableAdjuntos.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
             self.dlgET.tableAdjuntos.horizontalHeader().setVisible(True) # only because QT Designer keeps setting this to False
@@ -1421,8 +1424,7 @@ class SGC:
                                  "anidacion": 0,
                                  "id_objeto": p["id_objeto"] if "id_objeto" in p else None,
                                  "dato_alfa_jur": p["dato_alfa_jur"] if "dato_alfa_jur" in p else None,
-                                 "partida_inmobiliaria": p["partida_inmobiliaria"] if "partida_inmobiliaria" in p else None},
-                                )
+                                 "partida_inmobiliaria": p["partida_inmobiliaria"] if "partida_inmobiliaria" in p else None})
             p["anidacion"] = 0
             font = parents[-1].font()
             font.setPointSize(13)
@@ -2222,18 +2224,27 @@ class SGC:
     def runBandeja(self):
         try:
             self.toggleEnableToolbarIcons(False)
-            if self.first_start_BT == True:
+            # Limpiar si el diálogo ya existe
+            if not self.first_start_BT:
+                self.cleanupBandeja()
+            if self.first_start_BT:
                 self.first_start_BT = False
                 self.dlgBT = BandejaDialog()
-                # Lock resizing for user
+                # Bloquear el redimensionamiento por parte del usuario
                 self.dlgBT.setMaximumSize(self.dlgBT.size())
                 self.dlgBT.setMinimumSize(self.dlgBT.size())
                 self.defaultSizeBT = self.dlgBT.size()
-                self.dlgBT.setGeometry((QDesktopWidget().screenGeometry().width() / 2) - (self.defaultSizeBT.width() / 2),(QDesktopWidget().screenGeometry().height() / 2) - (self.defaultSizeBT.height() / 2),self.defaultSizeBT.width(),self.defaultSizeBT.height())
-                # table settings
+                # Centrar el diálogo en la pantalla
+                self.dlgBT.setGeometry(
+                    int((QDesktopWidget().screenGeometry().width() / 2) - (self.defaultSizeBT.width() / 2)),
+                    int((QDesktopWidget().screenGeometry().height() / 2) - (self.defaultSizeBT.height() / 2)),
+                    self.defaultSizeBT.width(),
+                    self.defaultSizeBT.height()
+                    )
+                # Configuración de la tabla
                 self.dlgBT.tableTramites.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
-                self.dlgBT.tableTramites.horizontalHeader().setVisible(True) # only because QT Designer keeps setting this to False
-                # Event handlers
+                self.dlgBT.tableTramites.horizontalHeader().setVisible(True)  # Asegurar que el encabezado sea visible
+                # Conexión de eventos
                 self.dlgBT.closed.connect(self.toggleEnableToolbarIcons)
                 self.dlgBT.rejected.connect(self.toggleEnableToolbarIcons)
                 self.dlgBT.prevButton.clicked.connect(lambda: self.changeBandejaPage("prev"))
@@ -2241,20 +2252,35 @@ class SGC:
                 self.dlgBT.reloadButton.clicked.connect(lambda: self.changeBandejaPage("reload"))
                 self.dlgBT.okButton.clicked.connect(self.procesarTramite)
                 self.dlgBT.tableTramites.horizontalHeader().sectionClicked.connect(self.BTtableHeaderClick)
-            self.securityBandejaTramite()
-            self.bandejaPage = 0
-            self.waitMsg = self.messageWait("Espere mientras se carga la bandeja de trámites...")
-            thread = self.ServerLoaderBandejaTramites(self,self.bandejaPage)
-            thread.finished.connect(self.finishedBandejaTramites)
-            thread.failed.connect(self.failedBandejaTramites)
-            thread.start()
+                self.securityBandejaTramite()
+                self.bandejaPage = 0
+                # Mostrar mensaje de espera
+                self.waitMsg = self.messageWait("Espere mientras se carga la bandeja de trámites...")
+                # Crear y ejecutar el hilo del servidor
+                thread = self.ServerLoaderBandejaTramites(self, self.bandejaPage)
+                thread.finished.connect(self.finishedBandejaTramites)
+                thread.failed.connect(self.failedBandejaTramites)
+                thread.start()
         except Exception as e:
-            # Manejo del error: registro, notificación al usuario, etc.
-            logging.error("Error en Bandeja de Tramite: {}".format(str(e)))
+            # Registrar el error en el log
+            logging.error("Error en Bandeja de Trámite: {}".format(str(e)))
             # Notificar al usuario del error
-            self.showErrorMessage("Se ha producido un error al ejecutar la bandeja de trámites.")
+            self.showErrorMessage(f"Se ha producido un error al ejecutar la bandeja de trámites:\n{str(e)}")
             # Habilitar nuevamente los íconos de la barra de herramientas
             self.toggleEnableToolbarIcons(True)
+    def cleanupBandeja(self):
+        """Limpia el estado del diálogo y libera recursos."""
+        if self.dlgBT:
+            self.dlgBT.close()
+            self.dlgBT = None
+        self.first_start_BT = True
+    def showErrorMessage(self, message):
+        """Mostrar un mensaje de error al usuario."""
+        msg_box = QMessageBox()
+        msg_box.setIcon(QMessageBox.Critical)
+        msg_box.setText(message)
+        msg_box.setWindowTitle("Error")
+        msg_box.exec_()
         
     def runConsulta(self):
         """ Run method for Busqueda Dialog """
@@ -2300,7 +2326,7 @@ class SGC:
             # Lock resizing for user
             self.dlgEOG.setMaximumSize(self.defaultSizeEOG)
             self.dlgEOG.setMinimumSize(self.defaultSizeEOG)
-            self.dlgEOG.setGeometry((QDesktopWidget().screenGeometry().width() / 2) - (self.defaultSizeEOG.width() / 2),(QDesktopWidget().screenGeometry().height() / 2) - (self.defaultSizeEOG.height() / 2),self.defaultSizeEOG.width(),self.defaultSizeEOG.height())
+            self.dlgEOG.setGeometry(int((QDesktopWidget().screenGeometry().width() / 2) - (self.defaultSizeEOG.width() / 2)),int((QDesktopWidget().screenGeometry().height() / 2) - (self.defaultSizeEOG.height() / 2)),self.defaultSizeEOG.width(),self.defaultSizeEOG.height())
             # Table config
             self.dlgEOG.resultsTable.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
             self.dlgEOG.resultsTable.horizontalHeader().setVisible(True) # only because QT Designer keeps setting this to False
