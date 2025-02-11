@@ -11,7 +11,10 @@
    </rect>
   </property>
   <property name="windowTitle">
-   <string>SGC - Login</string>
+   <string>SGC - Login QA</string>
+  </property>
+  <property name="styleSheet">
+   <string notr="true">background-color: rgb(0, 255, 0);</string>
   </property>
   <widget class="QLineEdit" name="lineEdit_user">
    <property name="geometry">
@@ -21,6 +24,9 @@
      <width>221</width>
      <height>27</height>
     </rect>
+   </property>
+   <property name="styleSheet">
+    <string notr="true">background-color: rgb(255, 255, 255);</string>
    </property>
    <property name="maxLength">
     <number>30</number>
@@ -34,6 +40,9 @@
      <width>221</width>
      <height>27</height>
     </rect>
+   </property>
+   <property name="styleSheet">
+    <string notr="true">background-color: rgb(255, 255, 255);</string>
    </property>
    <property name="maxLength">
     <number>30</number>
@@ -77,6 +86,9 @@
      <height>27</height>
     </rect>
    </property>
+   <property name="styleSheet">
+    <string notr="true">background-color: rgb(255, 255, 255);</string>
+   </property>
    <property name="text">
     <string>Ingresar</string>
    </property>
@@ -89,6 +101,9 @@
      <width>91</width>
      <height>27</height>
     </rect>
+   </property>
+   <property name="styleSheet">
+    <string notr="true">background-color: rgb(255, 255, 255);</string>
    </property>
    <property name="text">
     <string>SuperLogin</string>

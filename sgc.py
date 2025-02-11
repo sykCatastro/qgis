@@ -2025,7 +2025,8 @@ class SGC:
                 feature_featid = feature.attribute('featid')
                 print(f"Feature seleccionado: {int(feature_featid)}")
             except:
-                print(f"Feature sin featid")
+                print(f"Feature sin featid, usando id: {item["id"]}")
+                feature_featid = item["id"]
         message = QMessageBox(QMessageBox.Question, f"{'Asociación' if asociar else 'Desasociación'} de geometría", 
             f"¿Está seguro de que desea {'asociar la geometría elegida al' if asociar else 'desasociar la geometría del'} objeto seleccionado?"
             f"\nObjeto seleccionado: \nTipo: {item['tipo']}\nNombre: {item['nombre']}\nDescripción: {item['descripcion']}",
