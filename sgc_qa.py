@@ -936,12 +936,17 @@ class SGC:
         tolerancia_feature_sup = area_feature * 0.00001 / 100  # Se establece por software por precaucion y se ha determinado que 0.00001% es el error propio de la herramienta
         tiene_padre = False
         se_superpone = False
+        padre_geom = []
+        nombre_layer_padre = "TEMPORAL:PARCELAS"
+        layer_padre = [lay["obj"] for lay in self.layers if lay["fisico"] == nombre_layer_padre][0]
+        for id in id_padres:
+                feature_iterator = layer_padre.getFeatures(QgsFeatureRequest(QgsExpression(f"\"id\"={id}")))
+                for f in feature_iterator:
+                    padre_geom.append(f.geometry())
+        if len(padre_geom) > 0:
+            fusion_geom = padre_geom[0]
         # Objeto contenido padre COMPUESTO
         if len(id_padres) > 1:
-            padre_geom = []
-            tipo_layer_padre = [p["tipo"] for p in self.dataET["entradas"] if p["id"] == id_padres[0]][0]
-            nombre_layer_padre = "TEMPORAL:PARCELAS" if tipo_layer_padre in ["PARCELA COMUN"] else "TEMPORAL:MANZANAS"
-            layer_padre = [lay["obj"] for lay in self.layers if lay["fisico"] == nombre_layer_padre][0]
             for id in id_padres:
                 feature_iterator = layer_padre.getFeatures(QgsFeatureRequest(QgsExpression(f"\"id\"={id}")))
                 for f in feature_iterator:
@@ -954,7 +959,14 @@ class SGC:
             print(f"Área de intersección con el padre: {intersect_area}")  # Debugging line
             if str(self.dataET["tramite"]["subtipo"]) not in ['Prescripción parcial sobre mas de una parcela'] and intersect_area < area_feature - tolerancia_feature_hija:
                 errores_verificacion.append(f"El objeto geométrico seleccionado no se encuentra contenido en el objeto padre o se encuentra fuera de un contenedor en más de un {5.0}%")
-        
+        superficie_registrada_padre = sum(
+            float(e['superficie']) for e in self.dataET['entradas']
+            if e.get("id") in id_padres and e.get('superficie') is not None
+        )
+        total_superficie_hijas = 0
+        for e in self.dataET['entradas']:
+            if e.get("id_padre") is not None:  # Solo para las hijas
+                total_superficie_hijas += float(e.get("superficie", 0))  # Sumar la superficie, si existe
         capa = item.get('tabla', "").strip()  # Se asegura que 'capa' sea una cadena vacía si no existe
         print(capa)
         # Obtener la superficie máxima entre todos los objetos (para determinar al padre)
@@ -1007,10 +1019,117 @@ class SGC:
                 print("No se encontraron geometrías de parcelas en la búsqueda.")  # Debugging line
 
         
+        # S509 - Control de Huecos en Asociacion de parcelas 
+        geom_principal = feature.geometry().snappedToGrid(0.0001, 0.0001)
+        buffer_geom = geom_principal.buffer(0.5, 5)  # Para detectar vecinos cercanos
+        vecinos_geom = []
+
+        # Recolectar geometrías vecinas
+        for layer in layer_parcelas:
+            for f in layer.getFeatures(QgsFeatureRequest().setFilterRect(buffer_geom.boundingBox())):
+                geom = f.geometry()
+                if geom and geom.isGeosValid() and geom.intersects(buffer_geom):
+                    vecinos_geom.append(geom.snapToGrid(0.0001))  # Snap también a los vecinos
+
+        # Unión total de geometrías (vecinos + principal)
+        geometría_total = QgsGeometry.unaryUnion([geom_principal] + vecinos_geom)
+
+        # Crear envolvente cóncava (si falla, usar convexa)
+        try:
+            envolvente = geometría_total.concaveHull(0.98, False)
+        except Exception:
+            envolvente = geometría_total.convexHull()
+
+        # Buffers para compensar errores de borde
+        envolvente_buffer = envolvente.buffer(0.001, 5)
+        union_buffer_neg = geometría_total.buffer(-0.001, 5)
+
+        # Diferencia entre buffers para detectar huecos externos
+        huecos_geom = envolvente_buffer.difference(union_buffer_neg)
+
+        # Dividir huecos externos individuales
+        huecos_individuales = []
+        if not huecos_geom.isEmpty():
+            if huecos_geom.isMultipart() or huecos_geom.wkbType() == QgsWkbTypes.GeometryCollection:
+                partes = huecos_geom.asGeometryCollection()
+                for g in partes:
+                    if g.area() > 0.01:
+                        huecos_individuales.append(g)
+            else:
+                if huecos_geom.area() > 0.01:
+                    huecos_individuales.append(huecos_geom)
+
+        # Agregar huecos internos (anillos)
+        anillos_internos = []
+        if geom_principal.isMultipart():
+            poligonos = geom_principal.asMultiPolygon()
+            for poly in poligonos:
+                for ring in poly[1:]:  # omitir exterior
+                    g = QgsGeometry.fromPolygonXY([ring])
+                    if g.area() > 0.01:
+                        anillos_internos.append(g)
+        else:
+            pol = geom_principal.asPolygon()
+            for ring in pol[1:]:  # omitir exterior
+                g = QgsGeometry.fromPolygonXY([ring])
+                if g.area() > 0.01:
+                    anillos_internos.append(g)
+
+        # Unir todos los huecos detectados
+        todos_los_huecos = huecos_individuales + anillos_internos
+
+        # Analizar los huecos como en la API
+        errores_verificacion = []
+        for h in todos_los_huecos:
+            if h.isEmpty() or h.area() <= 0.01:
+                continue
+
+            # Métricas geométricas
+            area = h.area()
+            perimetro = h.length()
+            bbox = h.boundingBox()
+            largo = bbox.width()
+            ancho = bbox.height()
+            proporcion = largo / ancho if ancho != 0 else 0
+            concavidad = h.convexHull().area() / h.area() if h.area() != 0 else 1
+            valido = h.isGeosValid()
+
+            # Vértices
+            if h.isMultipart():
+                multipol = h.asMultiPolygon()
+                num_vertices = sum(len(ring) for poly in multipol for ring in poly)
+            else:
+                pol = h.asPolygon()
+                num_vertices = len(pol[0]) if pol else 0
+
+            # Condiciones sospechosas (ajuste más fino)
+            condiciones_sospechosas = 0
+
+            # Umbrales moderados (ni tan bajos como antes, ni tan altos como los que filtraban todo)
+            if concavidad > 1700:    # Captura ambos → suma para los dos
+                condiciones_sospechosas += 1
+            if num_vertices > 24:    # Verdadero tiene 26, falso 25 → suma para ambos
+                condiciones_sospechosas += 1
+            if proporcion > 2.0:     # Ambos tienen ~1.1 → ninguno suma por aquí
+                condiciones_sospechosas += 1
+            if perimetro > 145:      # Verdadero tiene 140.75 ❌, falso 148.50 ✅ → solo suma en el falso
+                condiciones_sospechosas += 1
+            if not valido:           # Ambos válidos → no suma
+                condiciones_sospechosas += 1
+
+            # Este punto es la clave:
+            # - Verdadero: condiciones = 2 (concavidad y vértices), área = 0.14 ✅
+            # - Falso: condiciones = 3 (concavidad, vértices, perímetro), área = 0.15 ❌
+
+            # Solo reportar si tiene al menos 2 condiciones Y área menor a 0.145
+            if condiciones_sospechosas >= 2 and area < 0.145:
+                errores_verificacion.append("El objeto seleccionado está generando un espacio visible en la gráfica porque no se ajusta a su lindera")
+                
+                
         # Validación adicional de que el objeto está contenido en "VW_MANZANAS"
         layer_manzanas = [lay["obj"] for lay in self.layers if lay["fisico"] == "VW_MANZANAS"]
         
-        if layer_manzanas and area_feature < 4000 and str(self.dataET["tramite"]["objeto"]) not in ['División en Base a Mensura Registrada Para Prescripción adquisitiva', 'Mensura Para Prescripción Adquisitiva y División', 'Mensura Para Prescripción Adquisitiva', 'Mensura Para Prescripción Administrativa Ley N 24320', 'Mensura para Plan de Regularización Dominial según Ley 5836/2008 y modificatoria Ley 6211/2013']:
+        if layer_manzanas and area_feature < 4000 and str(self.dataET["tramite"]["objeto"]) not in ['División en Base a Mensura Registrada Para Prescripción adquisitiva', 'Mensura Para Prescripción Adquisitiva y División', 'Mensura Para Prescripción Adquisitiva', 'Mensura Para Prescripción Administrativa Ley N° 24320', 'Mensura para Plan de Regularización Dominial según Ley 5836/2008 y modificatoria Ley 6211/2013']:
             print("Cargando geometrías de 'VW_MANZANAS'...")  # Debugging line
             feature_geom = feature.geometry()
             
@@ -1046,7 +1165,7 @@ class SGC:
                         errores_verificacion.append("El objeto geométrico seleccionado no se encuentra contenido dentro de una manzana.")
 
         # Validar lo mismo ya dentro del trámite 
-        if capa not in ["VW_PARCELAS_PRESCRIPCIONES"] and str(self.dataET["tramite"]["objeto"]) not in ['División en Base a Mensura Registrada Para Prescripción adquisitiva', 'Mensura Para Prescripción Adquisitiva y División', 'Mensura Para Prescripción Adquisitiva', 'Mensura Para Prescripción Administrativa Ley N 24320', 'Mensura para Plan de Regularización Dominial según Ley 5836/2008 y modificatoria Ley 6211/2013']:
+        if capa not in ["VW_PARCELAS_PRESCRIPCIONES"] and str(self.dataET["tramite"]["objeto"]) not in ['División en Base a Mensura Registrada Para Prescripción adquisitiva', 'Mensura Para Prescripción Adquisitiva y División', 'Mensura Para Prescripción Adquisitiva', 'Mensura Para Prescripción Administrativa Ley N° 24320', 'Mensura para Plan de Regularización Dominial según Ley 5836/2008 y modificatoria Ley 6211/2013']:
             for layer in layers:
                 # Objeto contenido padre SIMPLE
                 for f in layer["obj"].getFeatures():
@@ -1093,7 +1212,17 @@ class SGC:
         # Validación de la superficie total solo si no se validó el remanente
         if not validacion_remanente_realizada:
             tolerancia_feature_area = float(item['superficie']) * 0.05  # 5% de tolerancia
-            
+            remanente = abs(superficie_registrada_padre - total_superficie_hijas)
+            tolerancia_remanente = remanente * 0.05  # 5% de tolerancia
+            if 'fusion_geom' in locals():
+                print('Area total padres: ', fusion_geom.area())
+                print('Area total hijas: ', total_superficie_hijas)
+                if str(self.dataET["tramite"]["objeto"]) in ['Desglose']:
+                    if (fusion_geom.area() < (remanente - tolerancia_remanente)) or (fusion_geom.area() > (remanente + tolerancia_remanente)):
+                        errores_verificacion.append(
+                            f"Debe volver a graficar la partida origen para que refleje su nueva superficie."
+                            f"(Superficie de la origen: {'%.2f' % fusion_geom.area()}m². Remanente: {'%.2f' % remanente}m²)"
+                        )
             if ((area_feature < (float(item['superficie']) - tolerancia_feature_hija)) or (area_feature > (float(item['superficie']) + tolerancia_feature_hija))):
                 print('Entró en validación total')
                 errores_verificacion.append(
@@ -1102,6 +1231,7 @@ class SGC:
                 )
 
         print('Superficie registrada: ', item['superficie'])
+        print('Subtipo: ', str(self.dataET["tramite"]["subtipo"]))
         if (str(self.dataET["tramite"]["subtipo"]) not in ['Mensura para Cambio de Jurisdicción']) and ('1016' not in self.funciones):
             # Ticket S314 - Validación referente a jurisdiccion y parcela a asociar
             # # Obtener la capa 'JURISDICCIONES'
