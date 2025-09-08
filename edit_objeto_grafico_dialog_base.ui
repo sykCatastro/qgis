@@ -69,7 +69,17 @@
    </item>
    <item>
     <property name="text">
-     <string>Parcelas Saneables</string>
+     <string>Regularizacion Dominial</string>
+    </property>
+   </item>
+   <item>
+    <property name="text">
+     <string>Reputacion de Dominio</string>
+    </property>
+   </item>
+   <item>
+    <property name="text">
+     <string>Unidades Tributarias</string>
     </property>
    </item>
    <item>
@@ -79,17 +89,7 @@
    </item>
    <item>
     <property name="text">
-     <string>Barrios</string>
-    </property>
-   </item>
-   <item>
-    <property name="text">
      <string>Centros Urbanos</string>
-    </property>
-   </item>
-   <item>
-    <property name="text">
-     <string>Localidades</string>
     </property>
    </item>
    <item>

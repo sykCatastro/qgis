@@ -74,17 +74,32 @@
    </item>
    <item>
     <property name="text">
+     <string>Prescripciones</string>
+    </property>
+   </item>
+   <item>
+    <property name="text">
+     <string>Regularizacion Dominial</string>
+    </property>
+   </item>
+   <item>
+    <property name="text">
+     <string>Reputacion de Dominio</string>
+    </property>
+   </item>
+   <item>
+    <property name="text">
+     <string>Unidades Tributarias</string>
+    </property>
+   </item>
+   <item>
+    <property name="text">
      <string>Manzanas</string>
     </property>
    </item>
    <item>
     <property name="text">
-     <string>Jurisdicciones</string>
-    </property>
-   </item>
-   <item>
-    <property name="text">
-     <string>Localidades</string>
+     <string>Centros Urbanos</string>
     </property>
    </item>
    <item>
@@ -94,17 +109,12 @@
    </item>
    <item>
     <property name="text">
+     <string>Jurisdicciones</string>
+    </property>
+   </item>
+   <item>
+    <property name="text">
      <string>Departamentos</string>
-    </property>
-   </item>
-   <item>
-    <property name="text">
-     <string>Barrios</string>
-    </property>
-   </item>
-   <item>
-    <property name="text">
-     <string>Centros Urbanos</string>
     </property>
    </item>
   </widget>
