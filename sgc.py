@@ -942,7 +942,7 @@ class SGC:
         area_feature = geom_feature.area()
         tolerancia_feature_hija = area_feature * 0.05  # 5% de tolerancia
         tolerancia_feature_area = (float(item['superficie']) * 0.05) if item["superficie"] else None
-        tolerancia_feature_sup = area_feature * 0.01  # 1% segun promedio Ley 2283/68
+        tolerancia_feature_sup = area_feature * 1e-7  # 0.00001% error de herramienta
 
         # Preparar geometrías padre
         nombre_layer_padre = "TEMPORAL:PARCELAS"
@@ -997,7 +997,7 @@ class SGC:
                     intersect_area = fusion_geom_padre.intersection(geom_feature).area()
 
                     # Tolerancia mínima (para herramientas con error de dibujo)
-                    tolerancia_minima = min(area_feature, fusion_geom_padre.area()) * 0.01
+                    tolerancia_minima = min(area_feature, fusion_geom_padre.area()) * 1e-6
 
                     if intersect_area > tolerancia_minima:
                         errores_verificacion.append(
@@ -1067,7 +1067,7 @@ class SGC:
                     
                     if not fusion_parcelas_geom.isEmpty():
                         intersect_area_parcelas = fusion_parcelas_geom.intersection(geom_feature).area()
-                        if tiene_mismo_id and es_padre and intersect_area_parcelas > 0.01:
+                        if tiene_mismo_id and es_padre and intersect_area_parcelas > 1e-5:
                             errores_verificacion.append("El objeto geométrico seleccionado se superpone a otro del mismo tipo y jerarquía.")
                     
         # S509 - Control de huecos (optimizado) - No mostrar en prescripciones y desasociado 
@@ -1227,7 +1227,7 @@ class SGC:
                         if geom_otro.intersects(geom_feature):
                             intersect_geom = geom_otro.intersection(geom_feature)
                             intersect_area = intersect_geom.area()
-                            tolerancia_minima = max(0.01, min(geom_feature.area(), geom_otro.area()) * 0.01)
+                            tolerancia_minima = max(0.01, min(geom_feature.area(), geom_otro.area()) * 1e-6)
 
                             # Nuevo: tolerancia para comparar intersección con superficie
                             tolerancia_superficie = 0.01  # 1% de margen
@@ -1282,7 +1282,7 @@ class SGC:
                     # Validación de superposición con objetos del mismo tipo
                     if layer["fisico"].find(item["tipo"]) != -1 and f.attribute("anidacion") == item["anidacion"] and not se_superpone:
                         intersect_area = f.geometry().intersection(geom_feature).area()
-                        tolerancia_feature_sup_2 = f.geometry().area() * 0.01
+                        tolerancia_feature_sup_2 = f.geometry().area() * 1e-7
                         
                         if (tramite_objeto not in ['Adjudicación de partida inmobiliaria', 'Desglose'] and 
                             (intersect_area > tolerancia_feature_sup or intersect_area > tolerancia_feature_sup_2)) and f.geometry().intersects(geom_feature) or f.geometry().contains(geom_feature) or f.geometry().within(geom_feature) or f.geometry().overlaps(geom_feature):
