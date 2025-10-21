@@ -3,10 +3,10 @@
 # This file should be included when you package your plugin.# Mandatory items:
 
 [general]
-name=Sistema de Gestión Catastral 3.0
+name=Sistema de Gestión Catastral 4.0
 qgisMinimumVersion=3.0
-description=Sistema de Gestión Catastral 3.0
-version=3.0 (Release 23)
+description=Sistema de Gestión Catastral 4.0
+version=4.0 (Release 25)
 author=SyK Catastro Sistemas
 email=sykcatastro.sistemas@gmail.com
 
