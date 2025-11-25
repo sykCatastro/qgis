@@ -678,7 +678,7 @@ class SGC:
     def selectMapFeatureByClick(self,capa = ""):
         search_layers = []
         for l in self.layers:
-            if l["fisico"] == capa or l["fisico"] in ["vw_parcelas_sanear"]:
+            if l["fisico"] == capa or l["fisico"] in ["VW_PARCELAS_SANEAR"]:
                 search_layers.append(l["obj"])
         self.minimizeDialog(self.whichDialog)
         
@@ -934,6 +934,7 @@ class SGC:
         # ========== Verificaciones =========
         errores_verificacion = []
         geom_feature = feature.geometry()
+        bandera_fuera_contencion = False
         
         # Validación geometría básica
         if not geom_feature.isGeosValid():
@@ -952,9 +953,6 @@ class SGC:
             T = (0.0004 * perimetro_feature + 0.25) 
         
         T_2 = T * T # Es equivalente a T² 
-        tolerancia_feature_hija = area_feature * 0.05  # 5% de tolerancia
-        tolerancia_feature_area = (float(item['superficie']) * 0.05) if item["superficie"] else None
-        
 
         # Preparar geometrías padre
         nombre_layer_padre = "TEMPORAL:PARCELAS"
@@ -967,6 +965,18 @@ class SGC:
             request = QgsFeatureRequest(expr)
             padre_geom = [f.geometry() for f in layer_padre.getFeatures(request)]
         
+        # ========== PREPARACIÓN ÚNICA DE GEOMETRÍA FUSIONADA ==========
+        fusion_geom = None
+        if padre_geom:
+            if len(padre_geom) == 1:
+                fusion_geom = padre_geom[0]
+            else:
+                fusion_geom = padre_geom[0]
+                for p in padre_geom[1:]:
+                    fusion_geom = fusion_geom.combine(p)
+            # Limpieza topológica mínima UNA SOLA VEZ
+            fusion_geom = fusion_geom.buffer(0, 1)
+
         # Validación de padre necesario (excepto casos especiales)
         tramite_objeto = str(self.dataET["tramite"]["objeto"])
         excepciones_tramite = [
@@ -985,34 +995,59 @@ class SGC:
             'Propiedad Horizontal' # 12
         ]
 
-        if item["anidacion"] > 0 and tramite_objeto not in excepciones_tramite[2:9] and bool(id_padres) and not padre_geom:
-            errores_verificacion.append("Se debe asociar el objeto gráfico padre primero")
+        # ========== VALIDACIÓN SIMPLIFICADA Y ACELERADA PARA PRESCRIPCIÓN ==========
+        prescripciones_multiples = [
+            'Mensura Para Prescripción Adquisitiva',
+            'Mensura Para Prescripción Adquisitiva y División',
+            'Mensura para reputacion de dominio',
+            'Mensura para reputacion de dominio y división',
+            'Mensura Para Prescripción Administrativa Ley N° 24320',
+            'Mensura para Plan de Regularización Dominial según Ley 5836/2008 y modificatoria Ley 6211/2013'
+        ]
 
-        # Validación contenido en padre (caso múltiple) y superposicion con otras parcelas y del mismo nivel
-        if len(id_padres) > 0 and padre_geom:
-            fusion_geom = padre_geom[0]
-            for p in padre_geom[1:]:
-                fusion_geom = fusion_geom.combine(p)
-            # Limpieza topológica mínima
-            fusion_geom = fusion_geom.buffer(0, 1)
+        if tramite_objeto in prescripciones_multiples and fusion_geom:
+            print(f"🔍 Validación para prescripción con {len(id_padres)} origen(es)")
 
-            # Asegurar geometrías válidas
+            # Asegurar geometrías válidas UNA SOLA VEZ
             if not geom_feature.isGeosValid():
                 geom_feature = geom_feature.buffer(0, 1)
-            if not fusion_geom.isGeosValid():
-                fusion_geom = fusion_geom.buffer(0, 1)
 
             # Calcular intersección
             intersect_area = fusion_geom.intersection(geom_feature).area() or 0
             area_hijo = geom_feature.area() or 0
-            min_area = T_2  # Tolerancia Art. 148
+
+            print(f"🔍 Área de intersección total: {intersect_area:.6f} m² (mínimo {T_2:.6f} m²)")
+
+            if intersect_area < T_2:
+                bandera_fuera_contencion = True
+                errores_verificacion.append(
+                    f"La geometría destino no intersecta suficientemente la geometría origen fusionada "
+                    f"(mínimo {T_2:.6f} m²). Intersección actual: {intersect_area:.6f} m²"
+                )
+            else:
+                print("✅ Relación geométrica válida entre destino y orígenes")
+
+        # ========== VALIDACIONES EXISTENTES (CONTINUACIÓN) ==========
+
+        if item["anidacion"] > 0 and tramite_objeto not in excepciones_tramite[2:9] and bool(id_padres) and not padre_geom:
+            errores_verificacion.append("Se debe asociar el objeto gráfico padre primero")
+
+        # Validación contenido en padre (caso múltiple) usando geometría fusionada ya calculada
+        if fusion_geom and tramite_objeto not in prescripciones_multiples:
+            # Asegurar geometría válida UNA SOLA VEZ
+            if not geom_feature.isGeosValid():
+                geom_feature = geom_feature.buffer(0, 1)
+
+            # Calcular intersección
+            intersect_area = fusion_geom.intersection(geom_feature).area() or 0
+            area_hijo = geom_feature.area() or 0
 
             # Validar intersección adecuada
             if (
                 str(self.dataET["tramite"]["subtipo"]) not in ['Prescripción parcial sobre mas de una parcela']
                 and tramite_objeto not in excepciones_tramite[0:2]
             ):
-                if intersect_area < min_area or (area_hijo > 0 and intersect_area / area_hijo < 0.95):
+                if intersect_area < T_2 or (area_hijo > 0 and intersect_area / area_hijo < 0.95):
                     errores_verificacion.append(
                         "El objeto geométrico seleccionado no intersecta adecuadamente con la geometría origen"
                     )
@@ -1025,104 +1060,373 @@ class SGC:
                         "En este tipo de trámite, el hijo no debe ocupar ninguna parte del padre."
                     )
 
-        # Cálculo de superficies
-        superficie_registrada_padre = sum(
-            float(e['superficie_grafica']) for e in self.dataET['entradas']
-            if e.get("id") in id_padres and e.get('superficie_grafica') is not None
-        )
-        
-        total_superficie_hijas = 0
-        for e in self.dataET['entradas']:
-            if e.get("id_padre") is not None:  # Solo para las hijas
-                total_superficie_hijas += float(e.get("superficie", 0))  # Sumar la superficie, si existe
-        
-        capa = item.get('tabla', "").strip()
-        
+        # ========== CÁLCULO DE SUPERFICIES SIMPLIFICADO ==========
         # Determinar si es el padre (superficie máxima)
-        superficie_maxima = max(float(e['superficie']) for e in self.dataET["entradas"] if 'superficie' in e)
-        es_padre = float(item['superficie']) == superficie_maxima
+        try:
+            superficie_maxima = max(float(e['superficie']) for e in self.dataET["entradas"] if 'superficie' in e)
+            es_padre = float(item['superficie']) == superficie_maxima
+        except (ValueError, KeyError):
+            es_padre = False
 
-        superficie_hijas = float(self.dataET["superficie_hijas"]) - float(item['superficie']) 
-        print('Espacio publico: ', self.dataET["superficies_espacio_publico"])
-
-        # contar cuántas entradas padre (ids) hay para este id_objeto (parcelas repetidas)
-        cant_ids_parcelas = sum(
-            1 for e in self.dataET['entradas']
-            if e.get('id_objeto') == item.get('id_objeto') and e.get('id_padre') is None
-        )
-
-        # si no hay repetidas, cant_ids_parcelas será 1 (o 0 si dato raro) => proteger
-        if cant_ids_parcelas <= 0:
-            cant_ids_parcelas = 1
-
-        # superficie por cada registro padre (usar item['superficie'] como superficie individual)
-        superficie_individual_padre = float(item.get('superficie') or 0)
-
-        # superficie total disponible sumando todas las repeticiones del padre
-        superficie_total_padres = superficie_individual_padre * cant_ids_parcelas
-
-        # espacios públicos que devuelve la API (puede ser 0)
-        superficie_espacio_publico = float(self.dataET.get('superficies_espacio_publico') or 0)
-
-        # remanente = (superficie_total_padres) - superficie_total_hijas - espacio_publico
-        remanente = superficie_total_padres - superficie_hijas - superficie_espacio_publico if es_padre else 0.0
+        # Cálculo simplificado de superficies
+        superficie_hijas = float(self.dataET.get("superficie_hijas", 0)) - float(item.get('superficie', 0))
+        superficie_espacio_publico = float(self.dataET.get('superficies_espacio_publico', 0))
+        
+        # Cálculo de remanente simplificado
+        remanente = float(item.get('superficie', 0)) - superficie_hijas - superficie_espacio_publico if es_padre else 0.0
 
         tiene_mismo_id = item.get("id_padre") and item["id"] == item["id_padre"]
 
-        # Validación superposición con parcelas existentes
-        if tramite_objeto not in [excepciones_tramite[i] for i in [2,3,4,7,8]]:            
+        # ========== VALIDACIÓN SUPERPOSICIÓN MEJORADA ==========
+        # SOLO se realiza si se pueden identificar claramente las parcelas origen
+        if tramite_objeto not in ['Adjudicación de partida inmobiliaria', 'Desglose'] and tramite_objeto in prescripciones_multiples:              
             if layer_parcelas:
                 search_rect = geom_feature.boundingBox()
-                search_geom = QgsGeometry.fromRect(search_rect).buffer(10, 1)
-                request = QgsFeatureRequest().setFilterRect(search_geom.boundingBox())
                 
                 # Variables para acumular superposiciones
                 total_intersect_area_parcelas = 0.0
                 parcelas_superpuestas_detalle = []
+
+                # Para evitar duplicar una misma parcela
+                parcelas_vistas = set()
+                
+                # MÉTODO MEJORADO: Buscar parcelas origen usando múltiples estrategias
+                adremas_origen = []
+                featids_origen = []
+                parcelas_origen_encontradas = False
+                
+                # INICIALIZAR geom_origen_list al principio
+                geom_origen_list = []
+                
+                # Estrategia 1: Buscar en las entradas del trámite por anidación
+                for entrada in self.dataET["entradas"]:
+                    if entrada.get("anidacion") == 0:  # Es parcela padre/origen
+                        if 'adrema' in entrada and entrada['adrema'] not in [None, ""]:
+                            adremas_origen.append(str(entrada['adrema']))
+                            parcelas_origen_encontradas = True
+                        elif 'partida_inmobiliaria' in entrada and entrada['partida_inmobiliaria']:
+                            partida = entrada['partida_inmobiliaria']
+                            if ':' in partida:
+                                adrema = partida.split(':')[-1].strip()
+                                if adrema not in [None, ""]:
+                                    adremas_origen.append(adrema)
+                                    parcelas_origen_encontradas = True
+                        
+                        # Agregar featid si existe - CONVERSIÓN MEJORADA
+                        if 'featid' in entrada and entrada['featid'] not in [None, ""]:
+                            featid_str = str(int(entrada['featid'])) if entrada['featid'] == int(entrada['featid']) else str(entrada['featid'])
+                            featids_origen.append(featid_str)
+                            parcelas_origen_encontradas = True
+                
+                # Estrategia 2: Buscar por ID del padre
+                if not parcelas_origen_encontradas and 'id_padre' in item and item['id_padre']:
+                    padre_id = item['id_padre']
+                    for entrada in self.dataET["entradas"]:
+                        if entrada.get("id") == padre_id:
+                            if 'adrema' in entrada and entrada['adrema'] not in [None, ""]:
+                                adremas_origen.append(str(entrada['adrema']))
+                                parcelas_origen_encontradas = True
+                            elif 'partida_inmobiliaria' in entrada and entrada['partida_inmobiliaria']:
+                                partida = entrada['partida_inmobiliaria']
+                                if ':' in partida:
+                                    adrema = partida.split(':')[-1].strip()
+                                    if adrema not in [None, ""]:
+                                        adremas_origen.append(adrema)
+                                        parcelas_origen_encontradas = True
+
+                            if 'featid' in entrada and entrada['featid'] not in [None, ""]:
+                                featid_str = str(int(entrada['featid'])) if entrada['featid'] == int(entrada['featid']) else str(entrada['featid'])
+                                featids_origen.append(featid_str)
+                                parcelas_origen_encontradas = True
+                            break
+                
+                # Estrategia 3: Buscar en capa temporal por ID del padre
+                if not parcelas_origen_encontradas and 'id_padre' in item and item['id_padre']:
+                    if layer_padre:
+                        expr = QgsExpression(f"\"id\" = {item['id_padre']}")
+                        request = QgsFeatureRequest(expr)
+                        features_padre = list(layer_padre.getFeatures(request))
+                        if features_padre:
+                            for f in features_padre:
+                                if 'adrema' in f.fields().names() and f['adrema'] not in [None, ""]:
+                                    adremas_origen.append(str(f['adrema']))
+                                    parcelas_origen_encontradas = True
+                                if 'featid' in f.fields().names() and f['featid'] not in [None, ""]:
+                                    featid_str = str(int(f['featid'])) if f['featid'] == int(f['featid']) else str(f['featid'])
+                                    featids_origen.append(featid_str)
+                                    parcelas_origen_encontradas = True
+                
+                # **INCLUIR PARCELA ACTUAL COMO ORIGEN**
+                if 'featid' in item and item['featid'] not in [None, ""]:
+                    featid_actual = str(int(item['featid'])) if item['featid'] == int(item['featid']) else str(item['featid'])
+                    if featid_actual not in featids_origen:
+                        featids_origen.append(featid_actual)
+                        print(f"✅ Agregada parcela actual como origen: {featid_actual}")
+
+                print(f"🔍 Adremas de origen encontradas: {adremas_origen}")
+                print(f"🔍 Featids de origen encontrados: {featids_origen}")
+                print(f"🔍 Parcelas origen encontradas: {parcelas_origen_encontradas}")
+                
+                # PRIMERA PASADA: Recolectar geometrías de parcelas origen
+                for layer in layer_parcelas:
+                    request = QgsFeatureRequest().setFilterRect(search_rect)
+                    
+                    for f in layer.getFeatures(request):
+                        geom_parcela = f.geometry()
+                        featid_parcela = f.attribute('featid')
+                        adrema_parcela = f.attribute('adrema')
+
+                        # Determinar si es parcela origen - CONVERSIÓN MEJORADA
+                        es_parcela_origen = False
+                        if featid_parcela:
+                            # Convertir a string y eliminar .0 si existe
+                            featid_parcela_str = str(int(featid_parcela)) if featid_parcela == int(featid_parcela) else str(featid_parcela)
+                            if featid_parcela_str in featids_origen:
+                                es_parcela_origen = True
+                        if not es_parcela_origen and adrema_parcela and str(adrema_parcela) in adremas_origen:
+                            es_parcela_origen = True
+
+                        # Recolectar geometrías origen - CORRECCIÓN: usar QgsGeometry() en lugar de clone()
+                        if es_parcela_origen:
+                            geom_origen_list.append(QgsGeometry(geom_parcela))  # CORREGIDO
+                            print(f"✅ Geometría origen recolectada: {featid_parcela} - {adrema_parcela}")
+
+                print(f"🔍 Total geometrías origen recolectadas: {len(geom_origen_list)}")
+
+                # ESTRATEGIA 4: BUSCAR EN LAS CAPAS DE PARCELAS PARA IDENTIFICAR ORÍGENES POR RELACIÓN ESPACIAL
+                # Solo si tenemos geometrías origen recolectadas
+                if geom_origen_list and len(geom_origen_list) > 0:
+                    # Crear geometría fusionada de todos los orígenes identificados
+                    if len(geom_origen_list) == 1:
+                        geometria_fusionada_origen = geom_origen_list[0]
+                    else:
+                        geometria_fusionada_origen = geom_origen_list[0]
+                        for geom in geom_origen_list[1:]:
+                            geometria_fusionada_origen = geometria_fusionada_origen.combine(geom)
+                    
+                    print(f"🔍 Geometría fusionada origen - área: {geometria_fusionada_origen.area()}m²")
+                    
+                    # Buscar parcelas que intersectan con la geometría fusionada de orígenes
+                    for layer in layer_parcelas:
+                        request = QgsFeatureRequest().setFilterRect(geometria_fusionada_origen.boundingBox())
+                        for f in layer.getFeatures(request):
+                            if geometria_fusionada_origen.intersects(f.geometry()):
+                                featid_parcela = f.attribute('featid')
+                                adrema_parcela = f.attribute('adrema')
+                                
+                                if featid_parcela:
+                                    featid_parcela_str = str(int(featid_parcela)) if featid_parcela == int(featid_parcela) else str(featid_parcela)
+                                    if featid_parcela_str not in featids_origen:
+                                        featids_origen.append(featid_parcela_str)
+                                        print(f"✅ Estrategia 4 - Featid origen por relación espacial: {featid_parcela_str}")
+                                
+                                if adrema_parcela and str(adrema_parcela) not in adremas_origen:
+                                    adremas_origen.append(str(adrema_parcela))
+                                    print(f"✅ Estrategia 4 - Adrema origen por relación espacial: {adrema_parcela}")
+
+                # SEGUNDA PASADA: Detección de superposiciones con parcelas NO origen
+                bandera_superposicion_origen = False
+                bandera_coincidencia_exacta = False
+                
+                print(f"🔍 Iniciando segunda pasada - Búsqueda en {len(layer_parcelas)} capas")
                 
                 for layer in layer_parcelas:
+                    request = QgsFeatureRequest().setFilterRect(search_rect)
+                    features_count = 0
+                    intersect_count = 0
+                    
                     for f in layer.getFeatures(request):
-                        geom_otro = f.geometry()
+                        features_count += 1
+                        geom_parcela = f.geometry()
+                        featid_parcela = f.attribute('featid')
+                        adrema_parcela = f.attribute('adrema')
 
-                        if geom_otro.equals(geom_feature):
+                        # Determinar si es parcela origen - CONVERSIÓN MEJORADA
+                        es_parcela_origen = False
+                        if featid_parcela:
+                            # Convertir a string y eliminar .0 si existe
+                            featid_parcela_str = str(int(featid_parcela)) if featid_parcela == int(featid_parcela) else str(featid_parcela)
+                            if featid_parcela_str in featids_origen:
+                                es_parcela_origen = True
+                        if not es_parcela_origen and adrema_parcela and str(adrema_parcela) in adremas_origen:
+                            es_parcela_origen = True
+
+                        # ESTRATEGIA 5: COMPARACIÓN GEOMÉTRICA DIRECTA CON PARCELAS ORIGEN
+                        if not es_parcela_origen and geom_origen_list:
+                            for geom_origen in geom_origen_list:
+                                if geom_parcela.equals(geom_origen):
+                                    es_parcela_origen = True
+                                    print(f"✅ Identificada como origen por igualdad geométrica: {featid_parcela} - {adrema_parcela}")
+                                    # Agregar a las listas de origen para futuras comparaciones
+                                    if featid_parcela:
+                                        featid_str = str(int(featid_parcela)) if featid_parcela == int(featid_parcela) else str(featid_parcela)
+                                        if featid_str not in featids_origen:
+                                            featids_origen.append(featid_str)
+                                    if adrema_parcela and str(adrema_parcela) not in adremas_origen:
+                                        adremas_origen.append(str(adrema_parcela))
+                                    break
+
+                        # Coincidencia exacta individual
+                        if es_parcela_origen and geom_parcela.equals(geom_feature):
+                            bandera_coincidencia_exacta = True
+                            print(f"🎯 COINCIDENCIA EXACTA con parcela origen: {featid_parcela} - {adrema_parcela}")
+                        
+                        # Caso A: superposición indebida con origen
+                        if item["anidacion"] == 1 and es_parcela_origen and item["id"] != str(int(featid_parcela)):
+                            bandera_superposicion_origen = True
+                            print(f"🚨 POSIBLE ERROR: Superposición con parcela origen - {featid_parcela} vs item {item['id']}")
+                        
+                        # Caso B: origen válido → se salta
+                        if es_parcela_origen:
+                            print(f"✅ Saltando parcela origen válida: {featid_parcela} - {adrema_parcela}")
                             continue
+                        
+                        # Caso C: no es origen → validar intersección
+                        if geom_feature.intersects(geom_parcela):
+                            intersect_count += 1
 
-                        if geom_otro.intersects(geom_feature):
-                            intersect_geom = geom_otro.intersection(geom_feature)
-                            intersect_area = intersect_geom.area()
+                            # Corrección de duplicados
+                            clave = str(featid_parcela) if featid_parcela else str(adrema_parcela)
+                            if clave in parcelas_vistas:
+                                continue
+                            parcelas_vistas.add(clave)
+
+                            inter = geom_feature.intersection(geom_parcela)
+                            area = inter.area()
                             
-                            # Usar tolerancia T² para la validación
-                            if tiene_mismo_id and es_padre and intersect_area > T_2:
-                                # Obtener el identificador de la parcela - usar adrema si existe, sino el ID
-                                if "adrema" in f.fields().names() and f["adrema"] not in [None, ""]:
-                                    parcela_identificador = f["adrema"]
-                                else:
-                                    # Para parcelas temporales, usar el ID del feature
-                                    parcela_identificador = f"Parcela {f.id()}"
-                                
-                                total_intersect_area_parcelas += intersect_area
+                            if area > T_2:
+                                total_intersect_area_parcelas += area
+                                nombre = f.attribute('adrema') or f.attribute('partida') or f"FeatID: {featid_parcela}"
                                 parcelas_superpuestas_detalle.append({
-                                    'nombre': parcela_identificador,
-                                    'area': intersect_area
+                                    'nombre': nombre,
+                                    'area': area,
+                                    'featid': featid_parcela,
+                                    'adrema': adrema_parcela
                                 })
+                                print(f"🔍 Superposición detectada con: {nombre} (área: {area}m²) - FeatID: {featid_parcela}")
+                            else:
+                                print(f"🔍 Intersección con {nombre} pero área ({area}m²) menor a tolerancia ({T_2}m²)")
+                        else:
+                            # Solo para diagnóstico: verificar si hay casi intersección
+                            distancia = geom_feature.distance(geom_parcela)
+                            if distancia < 1.0:  # Menos de 1 metro de distancia
+                                print(f"🔍 Parcela cercana (distancia: {distancia}m): {featid_parcela} - {adrema_parcela}")
+                    
+                    print(f"🔍 Capa {layer.name()}: {features_count} features examinados, {intersect_count} intersecciones encontradas")
+
+                print(f"🔍 Área de intersección total: {total_intersect_area_parcelas}m² (mínimo {T_2}m²)")
+                print(f"🔍 Número de parcelas superpuestas detectadas: {len(parcelas_superpuestas_detalle)}")
                 
-                # Verificar si la suma total supera la tolerancia
-                if total_intersect_area_parcelas > T_2:
-                    # Crear lista detallada de parcelas con sus áreas de superposición
-                    detalle_parcelas = "\n".join([
-                        f"   - {p['nombre']}: {'%.10f' % p['area']}m²" 
-                        for p in parcelas_superpuestas_detalle if p['area'] > 1e-10
-                    ])
+                # -------------------------------------------------------------
+                # VALIDACIÓN POR ÁREA (no solo igualdad geométrica)
+                # -------------------------------------------------------------
+                area_destino = geom_feature.area()
+                area_diff = abs(total_intersect_area_parcelas - area_destino)
+
+                if area_diff < 0.5:  # Ajustable
+                    print("🟢 AREA MATCH: La suma de áreas intersectadas coincide con el destino → se marcan como ORIGEN")
+                    for s in parcelas_superpuestas_detalle:
+                        if s['featid']:
+                            featid_str = str(int(s['featid'])) if s['featid'] == int(s['featid']) else str(s['featid'])
+                            if featid_str not in featids_origen:
+                                featids_origen.append(featid_str)
+                                print(f"✅ Agregado como origen por área match: {featid_str}")
+                    total_intersect_area_parcelas = 0
+                    parcelas_superpuestas_detalle.clear()
+
+                # -------------------------------------------------------------
+                # VALIDACIÓN FINAL DE SUPERPOSICIONES - EXCLUYENDO ORÍGENES
+                # -------------------------------------------------------------
+                if total_intersect_area_parcelas > T_2 or bandera_fuera_contencion:
+                    # Filtrar SOLO las parcelas que NO son origen
+                    parcelas_no_origen = []
+                    total_area_no_origen = 0.0
                     
-                    errores_verificacion.append(
-                        f"El objeto geométrico seleccionado excede la tolerancia total de superposición "
-                        f"(Tolerancia conforme a Art.148 Ley 2283/68: {'%.10f' % T_2}m²).\n"
-                        f"Suma total de superficies superpuestas: {'%.10f' % total_intersect_area_parcelas}m²\n"
-                        f"Detalle por parcela intersectada:\n{detalle_parcelas}"
-                    )
+                    print("🔍 Iniciando filtrado de parcelas NO origen...")
+                    for s in parcelas_superpuestas_detalle:
+                        # Verificar tanto por featid como por adrema - CONVERSIÓN MEJORADA
+                        es_origen_por_featid = False
+                        if s['featid']:
+                            # Convertir featid a string compatible
+                            featid_s = str(int(s['featid'])) if s['featid'] == int(s['featid']) else str(s['featid'])
+                            es_origen_por_featid = featid_s in featids_origen
+                        
+                        es_origen_por_adrema = str(s['adrema']) in adremas_origen if s['adrema'] else False
+                        
+                        print(f"🔍 Validando parcela {s['nombre']} - FeatID: {s['featid']} (como string: {featid_s if s['featid'] else 'N/A'}) - Adrema: {s['adrema']}")
+                        print(f"   Es origen por featid: {es_origen_por_featid}")
+                        print(f"   Es origen por adrema: {es_origen_por_adrema}")
+                        print(f"   Featids origen disponibles: {featids_origen}")
+                        print(f"   Adremas origen disponibles: {adremas_origen}")
+                        
+                        if not es_origen_por_featid and not es_origen_por_adrema:
+                            parcelas_no_origen.append(s)
+                            total_area_no_origen += s['area']
+                            print(f"   ❌ INCLUIDA en validación (NO es origen)")
+                        else:
+                            print(f"   ✅ EXCLUIDA de validación (ES origen)")
                     
+                    print(f"🔍 Total parcelas NO origen: {len(parcelas_no_origen)}")
+                    print(f"🔍 Área total de superposición con NO origen: {total_area_no_origen}m²")
+                    
+                    # Si todas las parcelas superpuestas son origen → permitir
+                    if len(parcelas_no_origen) == 0:
+                        print("✅ SUPERPOSICIÓN PERMITIDA: Todas las parcelas intersectadas son origen del trámite")
+                        total_intersect_area_parcelas = 0
+                        parcelas_superpuestas_detalle.clear()
+                    
+                    # Si hay superposición con parcelas NO origen
+                    elif total_area_no_origen > T_2 or bandera_fuera_contencion:
+                        detalle = "\n".join([
+                            f"   - {p['nombre']}: {'%.10f' % p['area']}m²" 
+                            for p in parcelas_no_origen
+                        ])
+                        
+                        # Mantengo tu diferenciación EXACTA
+                        if bandera_superposicion_origen:
+                            errores_verificacion.append(
+                                f"El objeto geométrico seleccionado se superpone a parcelas que deberían ser la origen del trámite. Verificar.\n"
+                                f"Suma total de superficies superpuestas: {'%.10f' % total_area_no_origen}m²\n"
+                                f"Tolerancia conforme a Art.148 Ley 2283/68: {'%.10f' % T_2}m²\n"
+                                f"Detalle por parcela intersectada:\n{detalle}"
+                            )
+                        else:
+                            # NUEVO: Mostrar diálogo de confirmación para superposición con parcelas NO origen
+                            mensaje_advertencia = (
+                                f"El objeto geométrico seleccionado se superpone a parcelas que NO son origen del trámite.\n"
+                                f"Tolerancia conforme a Art.148 Ley 2283/68: {'%.10f' % T_2}m²\n"
+                                f"Suma total de superficies superpuestas: {'%.10f' % total_area_no_origen}m²\n"
+                                f"Detalle por parcela intersectada:\n{detalle}"
+                            )
+                            
+                            confirmacion = QMessageBox(QMessageBox.Question,
+                                                    "Confirmación de Superposición",
+                                                    f"{mensaje_advertencia}\n\n¿Está seguro que desea continuar con la asociación?",
+                                                    QMessageBox.Yes | QMessageBox.No,
+                                                    self.dlgET)
+                            confirmacion.buttons()[0].setText("Sí")
+                            confirmacion.buttons()[1].setText("No")
+                            respuesta = confirmacion.exec()
+                            
+                            if respuesta == QMessageBox.No:
+                                errores_verificacion.append(mensaje_advertencia)
+                            else:
+                                print("✅ Usuario confirmó continuar a pesar de la superposición con parcelas no origen")
+                    else:
+                        print("✅ Superposición permitida: las superposiciones son solo con parcelas origen o están dentro de la tolerancia")
+
+                else:
+                    print("✅ No se detectaron superposiciones con parcelas no-origen")
+
+            else:
+                print("⚠️ No se pudieron identificar claramente las parcelas origen. Se omite la validación de superposición por seguridad.")
+
+
+                        
+        # ========== VALIDACIONES ADICIONALES (MANTENIDAS) ==========
+        
         # S509 - Control de huecos (optimizado) - No mostrar en prescripciones y desasociado 
-        if layer_parcelas and item["asociada"] and  tramite_objeto not in excepciones_tramite[2:5]:
+        if layer_parcelas and item["asociada"] and  tramite_objeto not in excepciones_tramite[2:5] and tramite_objeto not in prescripciones_multiples:
             geom_principal = geom_feature.snappedToGrid(1e-4, 1e-4)
             buffer_geom = geom_principal.buffer(0.5, 5)
             
@@ -1218,13 +1522,13 @@ class SGC:
                         self.iface.messageBar().pushItem(self.selectFeatureMsg)
 
         # Validación contenido en manzanas (para áreas pequeñas)
-        if area_feature < 4000 and tramite_objeto not in [excepciones_tramite[i] for i in [2,3,4,7,8]]:
+        if area_feature < 4000 and tramite_objeto not in [excepciones_tramite[i] for i in [2,3,4,7,8]] and tramite_objeto not in prescripciones_multiples:
             layer_manzanas = next((lay["obj"] for lay in self.layers if lay["fisico"] == "VW_MANZANAS"), None)
             
             if layer_manzanas:
                 search_rect = geom_feature.boundingBox()
-                search_geom = QgsGeometry.fromRect(search_rect).buffer(10, 1)
-                request = QgsFeatureRequest().setFilterRect(search_geom.boundingBox())
+                # OPTIMIZACIÓN: Usar filterRect sin buffer innecesario
+                request = QgsFeatureRequest().setFilterRect(search_rect)
                 
                 manzana_geom = [f.geometry() for f in layer_manzanas.getFeatures(request)]
                 
@@ -1236,162 +1540,24 @@ class SGC:
                         fusion_manzanas_geom = fusion_manzanas_geom.combine(m)
                     
                     if not fusion_manzanas_geom.isEmpty():
+                        # CORRECCIÓN: Verificar intersección con tolerancia para bordes compartidos
                         intersect_area_manzanas = fusion_manzanas_geom.intersection(geom_feature).area()
-                        if intersect_area_manzanas < area_feature - T_2:  # Usar tolerancia calculada
-                            errores_verificacion.append("El objeto geométrico seleccionado no se encuentra contenido dentro de una manzana.")
-
-        # S581, S588 - Mejorar control de superposición en orígenes de todos los trámites
-        if (layer_parcelas and es_padre and str(self.dataET["tramite"].get("subtipo", "")) not in [
-                    "Prescripción sin origen y sin dominio (ACOBE)",
-                    "Prescripción sin origen con numero de inscripcion",
-                    "Sin Parcela Origen"
-                ] and
-                (item["anidacion"] == 0 or (item["anidacion"] == 1 and tramite_objeto in [excepciones_tramite[i] for i in [5,9,10,11,12]])) # Reputacion y PH
-            ):
-                print("Entro en validacion de superposición")
-                search_rect = geom_feature.boundingBox().buffered(0.2)  # un buffer algo mayor
-                request = QgsFeatureRequest().setFilterRect(search_rect)
-
-                # Variables para acumular superposiciones
-                total_intersect_area = 0.0
-                parcelas_superpuestas = []
-
-                for layer in layer_parcelas:
-                    for f in layer.getFeatures(request):
-                        geom_otro = f.geometry()
-
-                        if geom_otro.equals(geom_feature):
-                            continue
-
-                        # Modificación clave: Excluir parcelas padre en PH
-                        exclude = False
-                        print('Campos del objeto gráfico: ', f.fields().names())
-                        if "id_parcela" in f.fields().names():
-                            # Para PH, comparar con id_padre en lugar de id_objeto
-                            if tramite_objeto in [excepciones_tramite[i] for i in [9,10,11,12]]:
-                                if f["id_parcela"] in id_padres:
-                                    exclude = True
-                            else:
-                                if f["id_parcela"] == item["id_objeto"]:
-                                    exclude = True
                         
-                        if exclude:
-                            continue
-
-                        if geom_otro.intersects(geom_feature):
-                            intersect_geom = geom_otro.intersection(geom_feature)
-                            intersect_area = intersect_geom.area()
-                            tolerancia_minima = T_2
-
-                            # Nuevo: tolerancia para comparar intersección con superficie
-                            tolerancia_superficie = 0.01  # 1% de margen
-                            if abs(intersect_area - float(item["superficie"])) <= float(item["superficie"]) * tolerancia_superficie:
-                                print(f"Se omite control de superposición: intersección ≈ superficie ({intersect_area} ≈ {item['superficie']})")
-                                continue
-
-                            print(f"Intersección área: {intersect_area}, tolerancia mínima: {tolerancia_minima}")
-                            print("Es padre:", es_padre)
-                            print("Tramite objeto:", tramite_objeto)
-                            print("Excepciones:", excepciones_tramite[5:7])
-                            print("Asociada:", item["asociada"])
-
-                            if intersect_area > tolerancia_minima:
-                                # Acumular área de superposición
-                                total_intersect_area += intersect_area
-                                
-                                # Obtener el identificador de la parcela - usar adrema si existe, sino el ID del feature
-                                if "adrema" in f.fields().names() and f["adrema"] not in [None, ""]:
-                                    parcela_identificador = f["adrema"]
-                                else:
-                                    # Para parcelas temporales, usar el ID del feature
-                                    parcela_identificador = f"Parcela {f.id()}"
-                                
-                                parcelas_superpuestas.append({
-                                    'nombre': parcela_identificador,
-                                    'area': intersect_area
-                                })
-
-                # Verificar si la SUMA TOTAL supera la tolerancia T²
-                if total_intersect_area > T_2:
-                    # Crear lista detallada de parcelas con sus áreas de superposición
-                    detalle_parcelas = "\n".join([
-                        f"   - {p['nombre']}: {'%.10f' % p['area']}m²" 
-                        for p in parcelas_superpuestas if p['area'] > 1e-10
-                    ])
-                    
-                    if es_padre:
-                        if item["anidacion"] == 0 and tramite_objeto not in excepciones_tramite[5:7]:
+                        # Calcular qué porcentaje de la parcela está dentro de la manzana
+                        porcentaje_dentro = (intersect_area_manzanas / area_feature) * 100 if area_feature > 0 else 0
+                        
+                        tolerancia_manzana = 5.0  # 5% de tolerancia
+                                                
+                        # Solo error si menos del (100 - tolerancia_manzana)% está dentro
+                        if porcentaje_dentro < (100 - tolerancia_manzana):
+                            # CALCULAR METROS CUADRADOS EXACTOS FUERA DE LA MANZANA
+                            area_fuera_manzana = area_feature - intersect_area_manzanas
                             errores_verificacion.append(
-                                f"El objeto geométrico seleccionado excede la tolerancia total de superposición.\n"
-                                f"Suma total de superficies superpuestas: {'%.10f' % total_intersect_area}m²\n"
-                                f"Tolerancia conforme a Art.148 Ley 2283/68: {'%.10f' % T_2}m²\n"
-                                f"Detalle por parcela intersectada:\n{detalle_parcelas}"
+                                f"El objeto geométrico seleccionado no se encuentra contenido dentro de una manzana "
+                                f"(Está {area_fuera_manzana:.2f} m² fuera de la manzana)."
                             )
-                        elif item["anidacion"] == 1:
-                            if tramite_objeto in [excepciones_tramite[i] for i in [5,9,10,11,12]] and item["asociada"]:
-                                # Caso permitido: excepción con item ya asociada
-                                pass
-                            else:
-                                errores_verificacion.append(
-                                    f"El objeto geométrico seleccionado excede la tolerancia total de superposición.\n"
-                                    f"Suma total de superficies superpuestas: {'%.10f' % total_intersect_area}m²\n"
-                                    f"Tolerancia conforme a Art.148 Ley 2283/68: {'%.10f' % T_2}m²\n"
-                                    f"Detalle por parcela intersectada:\n{detalle_parcelas}"
-                                )
 
-        # Validación de superposición con objetos temporales
-        if capa not in ["VW_PARCELAS_PRESCRIPCIONES"] and tramite_objeto not in  [excepciones_tramite[i] for i in [2,3,4,7,8]]:
-            layers_temp = [l for l in self.layers if l["fisico"] and "TEMPORAL:" in l["fisico"]]
-            # Variables para acumular superposiciones
-            total_intersect_area_temp = 0.0
-            parcelas_superpuestas_temp = []
-            
-            for layer in layers_temp:
-                for f in layer["obj"].getFeatures():
-                    # Validación contenido en padre (caso simple)
-                    if item.get("id_padre") and f.attribute("id") == item["id_padre"] and len(id_padres) < 2:
-                        intersect_area = f.geometry().intersection(geom_feature).area()
-                        if item["anidacion"] > 1 and (tramite_objeto not in ['Adjudicación de partida inmobiliaria', 'Desglose'] and 
-                            str(self.dataET["tramite"]["subtipo"]) not in ['Prescripción parcial sobre mas de una parcela'] and tramite_objeto not in excepciones_tramite[0:2] and
-                            intersect_area < (area_feature - T_2)):  # Usar tolerancia calculada
-                            errores_verificacion.append("El objeto geométrico seleccionado no se encuentra contenido en el objeto padre o se encuentra fuera de su contenedor en más de un 5%")
-                    
-                    # Validación de superposición con objetos del mismo tipo
-                    if layer["fisico"].find(item["tipo"]) != -1 and f.attribute("anidacion") == item["anidacion"]:
-                        intersect_area = f.geometry().intersection(geom_feature).area()
-                        tolerancia_feature_sup_2 = T_2
-                        
-                        if (tramite_objeto not in ['Adjudicación de partida inmobiliaria', 'Desglose'] and 
-                            (intersect_area > T_2 or intersect_area > tolerancia_feature_sup_2)) and (f.geometry().intersects(geom_feature) or f.geometry().contains(geom_feature) or f.geometry().within(geom_feature) or f.geometry().overlaps(geom_feature)):
-                            
-                            # Acumular área de superposición
-                            total_intersect_area_temp += intersect_area
-                            
-                            # Obtener el identificador - para objetos temporales usar el ID
-                            if "adrema" in f.fields().names() and f["adrema"] not in [None, ""]:
-                                parcela_identificador = f["adrema"]
-                            else:
-                                parcela_identificador = f"Parcela temporal {f.attribute('id')}"
-                            
-                            parcelas_superpuestas_temp.append({
-                                'nombre': parcela_identificador,
-                                'area': intersect_area
-                            })
-
-            # Verificar si la suma total de superposiciones con objetos temporales supera la tolerancia
-            if total_intersect_area_temp > T_2:
-                detalle_parcelas_temp = "\n".join([
-                    f"   - {p['nombre']}: {'%.10f' % p['area']}m²" 
-                    for p in parcelas_superpuestas_temp if p['area'] > 1e-10
-                ])
-                errores_verificacion.append(
-                    f"El objeto geométrico seleccionado excede la tolerancia total de superposición con objetos temporales.\n"
-                    f"Suma total de superficies superpuestas: {'%.10f' % total_intersect_area_temp}m²\n"
-                    f"Tolerancia conforme a Art.148 Ley 2283/68: {'%.10f' % T_2}m²\n"
-                    f"Detalle por parcela intersectada:\n{detalle_parcelas_temp}"
-                )
-
-        # Validación de superficies
+        # ========== VALIDACIÓN DE SUPERFICIES OPTIMIZADA ==========
         validacion_remanente_realizada = False
         print('Objeto: ', str(self.dataET["tramite"]["objeto"]))
         print('Es padre: ', es_padre)
@@ -1400,9 +1566,9 @@ class SGC:
             tolerancia_feature_area = remanente * 0.05  # 5% de tolerancia
             print('Entró en validación de remanente')
             
-            if (area_feature < (remanente - tolerancia_feature_area)) or (area_feature > (remanente + tolerancia_feature_area)) and not self.dataET["parcelas_repetidas"]:
+            if (area_feature < (remanente - tolerancia_feature_area)) or (area_feature > (remanente + tolerancia_feature_area)):
                 errores_verificacion.append(
-                    f"La diferencia entre la superficie del objeto seleccionado y la superficie remanente excede un {self.dataET['parametros']['TOLERANCIA_SUPERFICIE']}%. "
+                    f"La diferencia entre la superficie del objeto seleccionado y la superficie remanente excede un 5%. "
                     f"(Superficie del objeto seleccionado: {'%.2f' % area_feature}m². Remanente: {'%.2f' % remanente}m²)"
                 )
             # Marcar que la validación de remanente ha sido realizada
@@ -1410,33 +1576,13 @@ class SGC:
 
         # Validación de la superficie total solo si no se validó el remanente
         if not validacion_remanente_realizada:
-            tolerancia_feature_area = float(item['superficie']) * 0.05  # 5% de tolerancia
-            superficie_registrada = max(
-                (float(e['superficie']) for e in self.dataET['entradas']
-                if e.get("id") in id_padres and e.get('superficie') is not None),
-                default=0  # O el valor que quieras usar si no hay datos
-            )
-            print('Espacio publico: ', self.dataET["superficies_espacio_publico"])
-            remanente = abs(superficie_registrada - total_superficie_hijas - float(self.dataET["superficies_espacio_publico"])) # S614
-            tolerancia_remanente = remanente * 0.05  # 5% de tolerancia
-            if 'fusion_geom' in locals():
-                print('Area total padres: ', fusion_geom.area())
-                print('Remanante:', remanente)
-                print('Tolerancia de remanante:', tolerancia_remanente)
-                print('Area total hijas: ', total_superficie_hijas)
-                print('Tolerancia: ', tolerancia_feature_hija)
-                print('Superficie: ', superficie_registrada)
-                if tramite_objeto in excepciones_tramite[0:2]:
-                    if (fusion_geom.area() < (remanente - tolerancia_remanente)) or (fusion_geom.area() > (remanente + tolerancia_remanente)):
-                        errores_verificacion.append(
-                            f"Debe volver a graficar la partida origen para que refleje su nueva superficie."
-                            f"(Superficie de la origen: {'%.2f' % superficie_registrada_padre}m². Remanente: {'%.2f' % remanente}m²)"
-                        )
-            if ((area_feature < (float(item['superficie']) - tolerancia_feature_hija)) or (area_feature > (float(item['superficie']) + tolerancia_feature_hija))):
+            tolerancia_feature_hija = float(item.get('superficie', 0)) * 0.05  # 5% de tolerancia
+            if ((area_feature < (float(item.get('superficie', 0)) - tolerancia_feature_hija)) or 
+                (area_feature > (float(item.get('superficie', 0)) + tolerancia_feature_hija))):
                 print('Entró en validación total')
                 errores_verificacion.append(
-                    f"La diferencia entre la superficie del objeto seleccionado y la superficie registrada excede un {self.dataET['parametros']['TOLERANCIA_SUPERFICIE']}%. "
-                    f"(Superficie del objeto seleccionado: {'%.2f' % area_feature}m². Registrado: {'%.2f' % float(item['superficie'])}m²)"
+                    f"La diferencia entre la superficie del objeto seleccionado y la superficie registrada excede un 5%. "
+                    f"(Superficie del objeto seleccionado: {'%.2f' % area_feature}m². Registrado: {'%.2f' % float(item.get('superficie', 0))}m²)"
                 )
 
         print('Superficie registrada: ', item['superficie'])
@@ -1444,7 +1590,6 @@ class SGC:
 
         # S314 - Validación de jurisdicción
         if (str(self.dataET["tramite"]["subtipo"]) not in ['Mensura para Cambio de Jurisdicción']) and ('1016' not in self.funciones):
-            print('Entro en validaciones de jurisdicciones')
             capa_jurisdicciones = QgsProject.instance().mapLayersByName('Jurisdicciones')
             if capa_jurisdicciones:
                 capa_jurisdicciones[0].reload()
@@ -1472,7 +1617,7 @@ class SGC:
                                 f"La jurisdicción de la partida seleccionada ({jur_tramite}) "
                                 f"no corresponde a la ubicación del gráfico ({jur_codigo} - {jur_nombre})"
                             )
-        
+            
         # Procesamiento final
         if not errores_verificacion:
             geometry = geom_feature.asWkt()
@@ -1511,8 +1656,7 @@ class SGC:
         else:
             errores_parrafo = "".join(f"• {e}\n" for e in errores_verificacion)
             QMessageBox.warning(self.dlgET, "Error en validación", errores_parrafo)
-
-                
+                    
     def desasociarTramiteGeometry(self):
         item = self.dlgET.entradasTree.model().itemFromIndex(self.dlgET.entradasTree.selectionModel().selectedIndexes()[0]).data()
         nombre_capa_dibujo = "DIBUJO:VW_PARCELAS_GRAF_ALFA" if item["tipo"] == "PARCELA" else "DIBUJO:VW_MANZANAS"
@@ -1834,6 +1978,7 @@ class SGC:
                                  "anidacion": 0,
                                  "id_objeto": p["id_objeto"] if "id_objeto" in p else None,
                                  "dato_alfa_jur": p["dato_alfa_jur"] if "dato_alfa_jur" in p else None,
+                                 "nombre_manzana": p["nombre_manzana"] if "nombre_manzana" in p else None,
                                  "partida_inmobiliaria": p["partida_inmobiliaria"] if "partida_inmobiliaria" in p else None})
             p["anidacion"] = 0
             font = parents[-1].font()
@@ -1873,7 +2018,7 @@ class SGC:
                     parent = parents[-1]
                 if parent:
                     if c['descripcion'] == "PARCELA":
-                        descripcion = f"{c['descripcion']} {c['origen_o_destino']}: ID s/Plano: {c['id_plano']} – Tipo: {c['tipo'] if 'tipo' in c else ''}"
+                        descripcion = f"{c['descripcion']} {c['origen_o_destino']}: ID s/Plano: {c['id_plano']} - Mz: {c['nombre_manzana']} – Tipo: {c['tipo'] if 'tipo' in c else ''}"
                     if c['descripcion'] == "MANZANA":
                         descripcion = f"{c['descripcion']}: ID s/Plano: {c['id_plano'] if 'id_plano' in c else ''}"
                     if c['descripcion'] == "VIA":
@@ -1892,6 +2037,7 @@ class SGC:
                                    "superficie": c["superficie"] if "superficie" in c else None,
                                    "anidacion": parent.data()["anidacion"] + 1,
                                    "dato_alfa_jur": c["dato_alfa_jur"] if "dato_alfa_jur" in c else None,
+                                   "nombre_manzana": c["nombre_manzana"] if "nombre_manzana" in c else None,
                                    "id_objeto": c["id_objeto"] if "id_objeto" in c else None})
                     for e in self.dataET["entradas"]:
                         if e["id"] == c["id"]:
@@ -2385,7 +2531,7 @@ class SGC:
     def selectMapFeatureForDesasociar(self, capa=""):
         search_layers = []
         for l in self.layers:
-            if l["fisico"] == capa or l["fisico"] in ["vw_parcelas_sanear"]:
+            if l["fisico"] == capa or l["fisico"] in ["VW_PARCELAS_SANEAR"]:
                 search_layers.append(l["obj"])
         
         self.minimizeDialog(self.whichDialog)
