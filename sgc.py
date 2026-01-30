@@ -313,6 +313,7 @@ class SGC:
             tray_icon_path = os.path.join(self.current_dir, 'icons/tray.png')
             consulta_icon_path = os.path.join(self.current_dir, 'icons/consulta.png')
             edit_objetos_graficos_icon_path = os.path.join(self.current_dir, 'icons/objetos_graficos.png')
+            sanear_icon_path = os.path.join(self.current_dir, 'icons/sanear.png')
             # Toolbar            
             self.user_toolbar = self.iface.addToolBar("SGC")
             self.user_toolbar.setObjectName("SGC")
@@ -951,7 +952,7 @@ class SGC:
             # Obtener capa asociada al feature de forma más eficiente
             try:
                 featureLayer = next((l["obj"] for l in self.layers if l["fisico"] == f"DIBUJO:{item['tabla']}"), None)
-                layer_parcelas = [lay["obj"] for lay in self.layers if lay["fisico"] in ["VW_PARCELAS_GRAF_ALFA", "VW_PARCELAS_GRAF_ALFA_RURALES"]]
+                layer_parcelas = [lay["obj"] for lay in self.layers if lay["fisico"] in ["VW_PARCELAS_GRAF_ALFA", "VW_PARCELAS_GRAF_ALFA_RURALES", "VW_PARCELAS_PH"]]
             except Exception as e:
                 error_inesperado()
                 
@@ -1051,8 +1052,6 @@ class SGC:
                 prescripciones_multiples = [
                     'Mensura Para Prescripción Adquisitiva',
                     'Mensura Para Prescripción Adquisitiva y División',
-                    'Mensura para reputacion de dominio',
-                    'Mensura para reputacion de dominio y división',
                     'Mensura Para Prescripción Administrativa Ley N° 24320',
                     'Mensura para Plan de Regularización Dominial según Ley 5836/2008 y modificatoria Ley 6211/2013'
                 ]
@@ -1108,7 +1107,7 @@ class SGC:
                     # Validar intersección adecuada
                     if (
                         str(self.dataET["tramite"]["subtipo"]) not in ['Prescripción parcial sobre mas de una parcela']
-                        and tramite_objeto not in excepciones_tramite[0:2]
+                        and tramite_objeto not in excepciones_tramite[0:2] and tramite_objeto not in ['Mensura para reputacion de dominio', 'Mensura para reputacion de dominio y división']
                     ):
                         if intersect_area < T_2 or (area_hijo > 0 and intersect_area / area_hijo < 0.95):
                             errores_verificacion.append(
@@ -1116,11 +1115,11 @@ class SGC:
                             )
 
                     # Validar superposición (para trámites específicos)
-                    if tramite_objeto in ['Adjudicación de partida inmobiliaria', 'Desglose']:
+                    if tramite_objeto in ['Adjudicación de partida inmobiliaria', 'Desglose', 'Mensura para reputacion de dominio', 'Mensura para reputacion de dominio y división']:
                         if intersect_area > T_2:
                             errores_verificacion.append(
                                 "El objeto geométrico seleccionado (hijo) se superpone al objeto origen. "
-                                "En este tipo de trámite, el hijo no debe ocupar ninguna parte del padre."
+                                "En este tipo de trámite, el hijo no debe ocupar ninguna parte de la parcela origen común."
                             )
             except Exception as e:
                 error_inesperado()
@@ -1396,7 +1395,7 @@ class SGC:
                         area_destino = geom_feature.area()
                         area_diff = abs(total_intersect_area_parcelas - area_destino)
 
-                        if area_diff < 0.5:  # Ajustable
+                        if area_diff < 0.5 and tramite_objeto not in ['Mensura para reputacion de dominio', 'Mensura para reputacion de dominio y división']:  # Ajustable
                             print("🟢 AREA MATCH: La suma de áreas intersectadas coincide con el destino → se marcan como ORIGEN")
                             for s in parcelas_superpuestas_detalle:
                                 if s['featid']:
@@ -1466,7 +1465,7 @@ class SGC:
                                 else:
                                     # NUEVO: Mostrar diálogo de confirmación para superposición con parcelas NO origen
                                     mensaje_advertencia = (
-                                        f"El objeto geométrico seleccionado se superpone a parcelas que NO son origen del trámite.\n"
+                                        f"El objeto geométrico seleccionado se superpone a parcelas a las que NO debería superponerse según trámite.\n"
                                         f"Tolerancia conforme a Art.148 Ley 2283/68: {'%.10f' % T_2}m²\n"
                                         f"Suma total de superficies superpuestas: {'%.10f' % total_area_no_origen}m²\n"
                                         f"Detalle por parcela intersectada:\n{detalle}"
@@ -1738,7 +1737,7 @@ class SGC:
                         area_destino = geom_feature.area()
                         area_diff = abs(total_intersect_area_parcelas - area_destino)
 
-                        if area_diff < 0.5:  # Ajustable
+                        if area_diff < 0.5 and tramite_objeto not in ['Mensura para reputacion de dominio', 'Mensura para reputacion de dominio y división']:  # Ajustable
                             print("🟢 AREA MATCH: La suma de áreas intersectadas coincide con el destino → se marcan como ORIGEN")
                             for s in parcelas_superpuestas_detalle:
                                 if s['featid']:
@@ -1799,7 +1798,7 @@ class SGC:
                                 
                                 # ERROR DIRECTO - SIN CONFIRMACIÓN PARA TRÁMITES QUE NO SON PRESCRIPCIÓN
                                 errores_verificacion.append(
-                                    f"El objeto geométrico seleccionado se superpone a parcelas que NO son origen del trámite.\n"
+                                    f"El objeto geométrico seleccionado se superpone a parcelas a las que NO debería superponerse según trámite.\n"
                                     f"Tolerancia conforme a Art.148 Ley 2283/68: {'%.10f' % T_2}m²\n"
                                     f"Suma total de superficies superpuestas: {'%.10f' % total_area_no_origen}m²\n"
                                     f"Detalle por parcela intersectada:\n{detalle}"
@@ -1807,7 +1806,189 @@ class SGC:
             except Exception as e:
                 error_inesperado()
                 
+            # ========== VALIDACIÓN DE CONSISTENCIA DE SUPERFICIE PARA PARCELAS ORIGEN (ASOCIADAS) ==========
+            try:
+                # Validar solo en las destinos y cuando el trámite no sea Desglose o Adjundicación de Partida Inmobiliaria.
+                if item["anidacion"] == 1 and tramite_objeto not in excepciones_tramite[0:2]:
+                    print("[DEBUG-SUP] === INICIANDO VALIDACIÓN DE SUPERFICIES ORIGEN ===")
+                    
+                    # 1. Obtener tolerancia de parámetros (porcentaje)
+                    tolerancia_sup_percent = 5.0  # valor por defecto
+                    if "parametros" in self.dataET and "TOLERANCIA_SUPERFICIE" in self.dataET["parametros"]:
+                        try:
+                            tolerancia_sup_percent = float(self.dataET["parametros"]["TOLERANCIA_SUPERFICIE"])
+                        except (ValueError, TypeError):
+                            tolerancia_sup_percent = 5.0
+                    print(f"[DEBUG-SUP] Tolerancia de superficie configurada: {tolerancia_sup_percent}%")
+                    
+                    # 2. Identificar TODAS las parcelas origen del trámite (nivel anidación 0 o sin padre)
+                    # Usar conjuntos para evitar duplicados por id_objeto o partida
+                    parcelas_origen_ids = set()
+                    parcelas_origen_partidas = set()
+                    parcelas_origen_unicas = []
+                    
+                    print("[DEBUG-SUP] === BUSCANDO PARCELAS ORIGEN EN ENTRADAS ===")
+                    for i, entrada in enumerate(self.dataET["entradas"]):
+                        if entrada.get("descripcion") == "PARCELA":
                             
+                            id_objeto = entrada.get("id_objeto")
+                            partida = entrada.get("partida_inmobiliaria")
+                            
+                            # Verificar si es origen y si ya no hemos procesado esta parcela
+                            if (entrada.get("anidacion", 999) == 0 or entrada.get("id_padre") is None):
+                                print(f"  -> ES ORIGEN (anidacion=0 o id_padre=None)")
+                                
+                                # Evitar duplicados: usar id_objeto si existe, si no usar partida
+                                if id_objeto and id_objeto not in parcelas_origen_ids:
+                                    parcelas_origen_ids.add(id_objeto)
+                                    parcelas_origen_unicas.append(entrada)
+                                    print(f"  -> Agregada (por id_objeto único)")
+                                elif partida and partida not in parcelas_origen_partidas:
+                                    parcelas_origen_partidas.add(partida)
+                                    parcelas_origen_unicas.append(entrada)
+                                    print(f"  -> Agregada (por partida única)")
+                                else:
+                                    print(f"  -> Omitida (ya procesada)")
+                    
+                    print(f"[DEBUG-SUP] Se encontraron {len(parcelas_origen_unicas)} parcelas origen únicas para validar")
+                    
+                    # CONJUNTO PARA CONTROLAR PARTIDAS QUE YA TIENEN ERROR REPORTADO
+                    partidas_con_error = set()
+                    
+                    # 3. Para cada parcela origen única, verificar consistencia si está asociada
+                    for parcela_origen in parcelas_origen_unicas:
+                        id_objeto_origen = parcela_origen.get("id_objeto")
+                        partida_origen = parcela_origen.get("partida_inmobiliaria", "N/A")
+                        
+                        print(f"\n[DEBUG-SUP] Procesando parcela origen única: {partida_origen} (id_objeto: {id_objeto_origen})")
+                        
+                        # Solo validar si la parcela origen está asociada
+                        if parcela_origen.get("asociada"):
+                            print(f"[DEBUG-SUP] Parcela origen {partida_origen} está marcada como asociada")
+                            
+                            # 3.1. CONSULTAR DIRECTAMENTE LA CAPA TEMPORAL PARA OBTENER TODAS LAS GEOMETRÍAS
+                            area_grafica_total = 0.0
+                            geometrias_encontradas = 0
+                            
+                            # Buscar la capa temporal de parcelas
+                            capa_temporal = next((lay["obj"] for lay in self.layers if lay["fisico"] == "TEMPORAL:PARCELAS"), None)
+                            if capa_temporal:
+                                print(f"[DEBUG-SUP] Consultando capa temporal: {capa_temporal.name()}")
+                                
+                                # Buscar todas las features con el id_objeto
+                                expr = QgsExpression(f"\"id_objeto\" = {id_objeto_origen}")
+                                request = QgsFeatureRequest(expr)
+                                
+                                try:
+                                    features = list(capa_temporal.getFeatures(request))
+                                    print(f"[DEBUG-SUP] Encontradas {len(features)} features en capa temporal para id_objeto {id_objeto_origen}")
+                                    
+                                    for feature in features:
+                                        geom = feature.geometry()
+                                        if geom and geom.isGeosValid():
+                                            area = geom.area()
+                                            area_grafica_total += area
+                                            geometrias_encontradas += 1
+                                            print(f"[DEBUG-SUP]   - Geometría {geometrias_encontradas}: {area:.6f} m²")
+                                            
+                                            # Debug: mostrar atributos de la feature
+                                            print(f"[DEBUG-SUP]     Attributos: id={feature.attribute('id')}, id_objeto={feature.attribute('id_objeto')}")
+                                except Exception as e:
+                                    print(f"[DEBUG-SUP] ERROR al consultar features: {str(e)}")
+                            else:
+                                print("[DEBUG-SUP] ERROR: No se encontró la capa temporal de parcelas")
+                            
+                            print(f"[DEBUG-SUP] Superficie gráfica total para {partida_origen}: {area_grafica_total:.6f} m² (suma de {geometrias_encontradas} geometrías)")
+                            
+                            # 3.2. Obtener superficie alfanumérica (usar la entrada actual)
+                            superficie_alfa = 0.0
+                            try:
+                                # Buscar la superficie en la entrada original
+                                sup_value = parcela_origen.get("superficie", 0)
+                                if hasattr(sup_value, 'to_eng_string'):
+                                    # Es un Decimal
+                                    superficie_alfa = float(sup_value)
+                                else:
+                                    superficie_alfa = float(sup_value) if sup_value else 0.0
+                                
+                                # Aplicar conversión si es tipo 2 o 3 (hectáreas a m²)
+                                id_tipo_parcela = parcela_origen.get("id_tipo_parcela") or parcela_origen.get("tipo")
+                                print(f"[DEBUG-SUP] Tipo parcela: {id_tipo_parcela}")
+                                if id_tipo_parcela in [2, 3, '2', '3']:
+                                    superficie_alfa *= 10000
+                                    print(f"[DEBUG-SUP] Conversión HA→m² aplicada: {superficie_alfa:.2f} m²")
+                            except Exception as sup_error:
+                                print(f"[DEBUG-SUP] Error al obtener superficie alfanumérica: {str(sup_error)}")
+                                superficie_alfa = 0.0
+                            
+                            print(f"[DEBUG-SUP] Superficie alfanumérica para {partida_origen}: {superficie_alfa:.6f} m²")
+                            
+                            # 3.3. Aplicar tolerancia y validar
+                            if superficie_alfa > 0 and area_grafica_total > 0:  # Solo validar si hay ambas superficies
+                                # Calcular tolerancia absoluta (porcentaje de la superficie alfanumérica)
+                                tolerancia_absoluta = (tolerancia_sup_percent / 100.0) * superficie_alfa
+                                
+                                # Calcular diferencia
+                                diferencia = abs(area_grafica_total - superficie_alfa)
+                                porcentaje_diferencia = (diferencia / superficie_alfa) * 100 if superficie_alfa > 0 else 100
+                                
+                                print(f"[DEBUG-SUP] Validación para {partida_origen}:")
+                                print(f"  - Área gráfica (SUMA): {area_grafica_total:.6f} m²")
+                                print(f"  - Área alfanumérica: {superficie_alfa:.6f} m²")
+                                print(f"  - Diferencia: {diferencia:.6f} m² ({porcentaje_diferencia:.2f}%)")
+                                print(f"  - Tolerancia ({tolerancia_sup_percent}%): ±{tolerancia_absoluta:.6f} m²")
+                                
+                                if diferencia > tolerancia_absoluta:
+                                    # Inconsistencia fuera de tolerancia
+                                    print(f"[DEBUG-SUP] ERROR: Parcela origen {partida_origen} fuera de tolerancia")
+                                    
+                                    # VERIFICAR SI ESTA PARTIDA YA TIENE UN ERROR REPORTADO
+                                    if partida_origen not in partidas_con_error:
+                                        # Agregar error solo si no se ha reportado antes para esta partida
+                                        errores_verificacion.append(
+                                            f"INCONSISTENCIA GRÁFICA EN PARCELA ORIGEN (Partida: {partida_origen}):\n"
+                                            f"  • Superficie alfanumérica: {superficie_alfa:.2f} m²\n"
+                                            f"  • Superficie gráfica: {area_grafica_total:.2f} m²\n"
+                                            f"  • Diferencia: {diferencia:.2f} m² ({porcentaje_diferencia:.1f}%)\n"
+                                            f"  • Tolerancia permitida ({tolerancia_sup_percent}%): ±{tolerancia_absoluta:.2f} m²\n"
+                                            f"\n"
+                                            f"La parcela origen debe tener su superficie gráfica consistente "
+                                            f"con la alfanumérica antes de asociar nuevas parcelas destino."
+                                        )
+                                        # Registrar que esta partida ya tiene un error
+                                        partidas_con_error.add(partida_origen)
+                                        print(f"[DEBUG-SUP] Error agregado para partida {partida_origen}")
+                                    else:
+                                        print(f"[DEBUG-SUP] Error ya reportado anteriormente para partida {partida_origen}, omitiendo")
+                                else:
+                                    print(f"[DEBUG-SUP] ✓ Parcela origen {partida_origen} OK: dentro de tolerancia")
+                            elif area_grafica_total == 0:
+                                print(f"[DEBUG-SUP] ADVERTENCIA: Parcela origen {partida_origen} no tiene geometrías asociadas en la capa temporal")
+                            elif superficie_alfa == 0:
+                                print(f"[DEBUG-SUP] ADVERTENCIA: No se pudo obtener superficie alfanumérica para parcela origen {partida_origen}")
+                        
+                        elif parcela_origen.get("asociada") and not parcela_origen.get("geometry"):
+                            # Está marcada como asociada pero no tiene geometría en la entrada, pero podría tener en la capa temporal
+                            print(f"[DEBUG-SUP] ADVERTENCIA: Parcela origen {partida_origen} marcada como asociada pero sin geometría en entrada. Verificando capa temporal...")
+                            # Podríamos también verificar en la capa temporal, pero por ahora solo advertimos
+                            if partida_origen not in partidas_con_error:
+                                errores_verificacion.append(
+                                    f"La parcela origen (Partida: {partida_origen}) está marcada como asociada "
+                                    f"pero no tiene geometría definida en la entrada. Esto puede indicar un error en los datos."
+                                )
+                                partidas_con_error.add(partida_origen)
+                        else:
+                            print(f"[DEBUG-SUP] Parcela origen {partida_origen} no está asociada o no tiene geometría, omitiendo validación")
+                    
+                    print(f"[DEBUG-SUP] Validación de superficies origen completada. Errores encontrados: {len(errores_verificacion)}")    
+            except Exception as e:
+                print(f"[DEBUG-SUP] ERROR en validación de superficies origen: {str(e)}")
+                import traceback
+                traceback.print_exc()
+                errores_verificacion.append(
+                    f"Error al validar consistencia de superficies de parcelas origen: {str(e)}\n"
+                    f"Por favor, verifique manualmente las superficies antes de continuar."
+                )  
             # ========== VALIDACIONES ADICIONALES (MANTENIDAS) ==========
             
             # S509 - Control de huecos (optimizado) - No mostrar en prescripciones y desasociado 
@@ -2066,168 +2247,6 @@ class SGC:
             print('Superficie registrada: ', item['superficie'])
             print('Subtipo: ', str(self.dataET["tramite"]["subtipo"]))
             
-            # S314 - Validación de jurisdicción
-            try:
-                if (str(self.dataET["tramite"]["subtipo"]) not in ['Mensura para Cambio de Jurisdicción']):
-                    capa_jurisdicciones = QgsProject.instance().mapLayersByName('Jurisdicciones')
-                    if capa_jurisdicciones:
-                        capa_jurisdicciones[0].reload()
-                        time.sleep(2)
-                        
-                        geom = geom_feature
-                        expresion = f"contains($geometry, geom_from_wkt('{geom.asWkt()}'))"
-                        capa_jurisdicciones[0].selectByExpression(expresion)
-                        jurisdicciones = capa_jurisdicciones[0].selectedFeatures()
-                        
-                        if jurisdicciones:
-                            jur_grafico = jurisdicciones[0]['featid']
-                            jur_codigo = jurisdicciones[0]['codigo']
-                            jur_nombre = jurisdicciones[0]['nombre']
-                            
-                            # Obtener la jurisdicción del item
-                            jur_item = item.get('dato_alfa_jur')
-                            
-                            # Si no hay dato_alfa_jur, intentar obtener de partida_inmobiliaria
-                            if not jur_item and item.get('partida_inmobiliaria'):
-                                # Extraer código de jurisdicción de partida_inmobiliaria (primeros 2 caracteres)
-                                jur_item = item['partida_inmobiliaria'][:2]
-                            
-                            print(f"[JURISDICCIÓN] Jurisdicción gráfica: Código={jur_codigo}, Nombre={jur_nombre}, FeatID={jur_grafico}")
-                            print(f"[JURISDICCIÓN] Jurisdicción del item: {jur_item}")
-                            
-                            # Determinar qué mostrar en el mensaje
-                            if int(item['anidacion']) == 0:
-                                # Para padre/origen: mostrar jurisdicción de la partida
-                                jur_partida = item.get('partida_inmobiliaria', '')[:2] if item.get('partida_inmobiliaria') else 'Desconocida'
-                            else:
-                                # Para hijos: mostrar jurisdicción del trámite
-                                jur_partida = str(self.dataET["tramite"]["jurisdiccion"]).strip()
-                            
-                            print(f"[JURISDICCIÓN] Comparando: jur_item='{jur_item}' vs jur_codigo='{jur_codigo}'")
-                            
-                            # IMPORTANTE: Si jur_item es None, no podemos validar
-                            if jur_item is None:
-                                print("[JURISDICCIÓN] No hay jur_item para comparar. No se valida jurisdicción.")
-                            else:
-                                # Primero, intentar comparar como números (featids)
-                                try:
-                                    jur_item_num = int(jur_item)
-                                    jur_grafico_num = int(jur_grafico)
-                                    
-                                    if jur_item_num != jur_grafico_num:
-                                        print(f"[JURISDICCIÓN] DISCREPANCIA ENCONTRADA (featid): {jur_item_num} != {jur_grafico_num}")
-                                        mensaje_error = (f"La jurisdicción de la partida seleccionada ({jur_partida}) "
-                                                    f"no corresponde a la ubicación del gráfico ({jur_codigo} - {jur_nombre})")
-                                        
-                                        # Usuario SIN permiso 1016 → ERROR DIRECTO
-                                        if '1016' not in self.funciones:
-                                            print(f"[JURISDICCIÓN] Usuario SIN función 1016. Error irremediable.")
-                                            errores_verificacion.append(mensaje_error)
-                                        # Usuario CON permiso 1016 → PREGUNTAR CONFIRMACIÓN
-                                        else:
-                                            print(f"[JURISDICCIÓN] Usuario CON función 1016. Solicitando confirmación.")
-                                            mensaje_confirmacion = f"{mensaje_error}\n\n¿Desea continuar con la asociación a pesar de la discrepancia?"
-                                            confirmacion = QMessageBox(QMessageBox.Question,
-                                                                    "Confirmación de jurisdicción",
-                                                                    mensaje_confirmacion,
-                                                                    QMessageBox.Yes | QMessageBox.No,
-                                                                    self.dlgET)
-                                            confirmacion.buttons()[0].setText("Sí, continuar")
-                                            confirmacion.buttons()[1].setText("No, cancelar")
-                                            if confirmacion.exec() == QMessageBox.No:
-                                                print("[JURISDICCIÓN] Usuario eligió NO continuar. Agregando error.")
-                                                errores_verificacion.append(mensaje_error)
-                                            else:
-                                                print("[JURISDICCIÓN] Usuario eligió continuar. Omitiendo error.")
-                                    else:
-                                        print(f"[JURISDICCIÓN] Jurisdicción COINCIDE (featid): {jur_item_num} == {jur_grafico_num}")
-                                        
-                                except (ValueError, TypeError):
-                                    # Si no se puede convertir a números, comparar como strings
-                                    print("[JURISDICCIÓN] No se puede comparar como números, comparando como strings")
-                                    if str(jur_item).strip() != str(jur_codigo).strip():
-                                        print(f"[JURISDICCIÓN] DISCREPANCIA ENCONTRADA (string): '{jur_item}' != '{jur_codigo}'")
-                                        mensaje_error = (f"La jurisdicción de la partida seleccionada ({jur_partida}) "
-                                                    f"no corresponde a la ubicación del gráfico ({jur_codigo} - {jur_nombre})")
-                                        
-                                        # Usuario SIN permiso 1016 → ERROR DIRECTO
-                                        if '1016' not in self.funciones:
-                                            print(f"[JURISDICCIÓN] Usuario SIN función 1016. Error irremediable.")
-                                            errores_verificacion.append(mensaje_error)
-                                        # Usuario CON permiso 1016 → PREGUNTAR CONFIRMACIÓN
-                                        else:
-                                            print(f"[JURISDICCIÓN] Usuario CON función 1016. Solicitando confirmación.")
-                                            mensaje_confirmacion = f"{mensaje_error}\n\n¿Desea continuar con la asociación a pesar de la discrepancia?"
-                                            confirmacion = QMessageBox(QMessageBox.Question,
-                                                                    "Confirmación de jurisdicción",
-                                                                    mensaje_confirmacion,
-                                                                    QMessageBox.Yes | QMessageBox.No,
-                                                                    self.dlgET)
-                                            confirmacion.buttons()[0].setText("Sí, continuar")
-                                            confirmacion.buttons()[1].setText("No, cancelar")
-                                            if confirmacion.exec() == QMessageBox.No:
-                                                print("[JURISDICCIÓN] Usuario eligió NO continuar. Agregando error.")
-                                                errores_verificacion.append(mensaje_error)
-                                            else:
-                                                print("[JURISDICCIÓN] Usuario eligió continuar. Omitiendo error.")
-                                    else:
-                                        print(f"[JURISDICCIÓN] Jurisdicción COINCIDE (string): '{jur_item}' == '{jur_codigo}'")
-                        else:
-                            # NO se encontró jurisdicción gráfica
-                            mensaje_error = "No se pudo determinar la jurisdicción gráfica para la geometría seleccionada."
-                            print(f"[JURISDICCIÓN] {mensaje_error}")
-                            
-                            # Usuario SIN permiso 1016 → ERROR DIRECTO
-                            if '1016' not in self.funciones:
-                                print("[JURISDICCIÓN] Usuario SIN función 1016. Error irremediable. Cancelando operación.")
-                                errores_verificacion.append(mensaje_error)
-                            # Usuario CON permiso 1016 → PREGUNTAR CONFIRMACIÓN
-                            else:
-                                print("[JURISDICCIÓN] Usuario CON función 1016. Solicitando confirmación.")
-                                mensaje_confirmacion = f"{mensaje_error}\n\n¿Desea continuar con la asociación sin validación de jurisdicción?"
-                                confirmacion = QMessageBox(QMessageBox.Question,
-                                                        "Confirmación de jurisdicción",
-                                                        mensaje_confirmacion,
-                                                        QMessageBox.Yes | QMessageBox.No,
-                                                        self.dlgET)
-                                confirmacion.buttons()[0].setText("Sí, continuar")
-                                confirmacion.buttons()[1].setText("No, cancelar")
-                                if confirmacion.exec() == QMessageBox.No:
-                                    print("[JURISDICCIÓN] Usuario eligió NO continuar. Agregando error.")
-                                    errores_verificacion.append(mensaje_error)
-                                else:
-                                    print("[JURISDICCIÓN] Usuario eligió continuar. Omitiendo error.")
-                    else:
-                        # NO existe la capa 'Jurisdicciones'
-                        mensaje_error = "No se encontró la capa 'Jurisdicciones' en el proyecto."
-                        print(f"[JURISDICCIÓN] {mensaje_error}")
-                        
-                        # Usuario SIN permiso 1016 → ERROR DIRECTO
-                        if '1016' not in self.funciones:
-                            print("[JURISDICCIÓN] Usuario SIN función 1016. Error irremediable. Cancelando operación.")
-                            errores_verificacion.append(mensaje_error)
-                        # Usuario CON permiso 1016 → PREGUNTAR CONFIRMACIÓN
-                        else:
-                            print("[JURISDICCIÓN] Usuario CON función 1016. Solicitando confirmación.")
-                            mensaje_confirmacion = f"{mensaje_error}\n\n¿Desea continuar con la asociación sin validación de jurisdicción?"
-                            confirmacion = QMessageBox(QMessageBox.Question,
-                                                    "Confirmación de jurisdicción",
-                                                    mensaje_confirmacion,
-                                                    QMessageBox.Yes | QMessageBox.No,
-                                                    self.dlgET)
-                            confirmacion.buttons()[0].setText("Sí, continuar")
-                            confirmacion.buttons()[1].setText("No, cancelar")
-                            if confirmacion.exec() == QMessageBox.No:
-                                print("[JURISDICCIÓN] Usuario eligió NO continuar. Agregando error.")
-                                errores_verificacion.append(mensaje_error)
-                            else:
-                                print("[JURISDICCIÓN] Usuario eligió continuar. Omitiendo error.")
-            except Exception as e:
-                # En lugar de llamar a error_inesperado(), manejamos el error de forma más controlada
-                print(f"[JURISDICCIÓN] Error inesperado en validación de jurisdicción: {str(e)}")
-                logging.error(f"Error inesperado en validación de jurisdicción: {str(e)}")
-                errores_verificacion.append("Se produjo un error inesperado en la validación de jurisdicción.")
-                            
             # Procesamiento final
             if not errores_verificacion:
                 try:
@@ -2238,42 +2257,186 @@ class SGC:
                         "tabla": item["tabla_grafica"],
                         "geometry": geometry,
                         "id_parcela": item["id_objeto"],
-                        "id_tramite": self.dataET["tramite"]["id_tramite"]
+                        "id_tramite": self.dataET["tramite"]["id_tramite"],
+                        "dato_alfa_jur": item.get('dato_alfa_jur'),
+                        "subtipo": self.dataET["tramite"]["subtipo"]
                     }]
                     
+                    # ÚNICA PETICIÓN: Validación y ejecución directa
                     r = requests.put(
                         url=self.URL + "geometria_temporal",
-                        data=json.dumps(payload),
-                        headers={'Authorization': f"Bearer {self.TOKEN}"}
+                        data=json.dumps({"data": payload, "confirmar": True}),  # Puede ser True o False, ya no importa
+                        headers={'Authorization': f"Bearer {self.TOKEN}"},
+                        timeout=30
                     )
+                    # 1. Información básica de la respuesta HTTP
+                    print(f"[DEBUG-PLUGIN] Código de estado HTTP: {r.status_code}")
+                    print(f"[DEBUG-PLUGIN] Tamaño de respuesta: {len(r.text)} bytes")
+                    print(f"[DEBUG-PLUGIN] Headers de respuesta: {dict(r.headers)}")
+                    print(f"[DEBUG-PLUGIN] Encoding detectado: {r.encoding}")
                     
+                    # 2. Respuesta bruta (primeros 1000 caracteres)
+                    raw_text = r.text
+                    print(f"[DEBUG-PLUGIN] Respuesta bruta (primeros 1000 chars): {raw_text[:1000]}")
+                    
+                    # 3. Verificar si hay caracteres especiales o problemas
+                    print(f"[DEBUG-PLUGIN] ¿Contiene 'advertencia' en texto? {'advertencia' in raw_text.lower()}")
+                    print(f"[DEBUG-PLUGIN] ¿Contiene 'EXITO' en texto? {'EXITO' in raw_text}")
+                    # Manejo de respuesta de la API 
                     if r.status_code == 200:
-                        self.loadTramiteLayerGroup(True)
-                        QMessageBox.information(self.dlgET, "Éxito", "Geometría asociada con éxito")
-                        featureLayer.deleteFeatures([feature.id()])
-                        featureLayer.triggerRepaint()
-                        self.ETtabDatosEspecificos = True
-                        self.procesarTramite()
+                        response_data = r.json()
+                        
+                        print(f"[DEBUG] Respuesta API: {response_data}")
+                        
+                        if "ERROR" in response_data:
+                            # Error bloqueante de la API
+                            if "detalles" in response_data and "ERROR" in response_data["detalles"]:
+                                if isinstance(response_data["detalles"]["ERROR"], list):
+                                    errores_api = "\n".join(f"• {e}" for e in response_data["detalles"]["ERROR"])
+                                else:
+                                    errores_api = response_data["detalles"]["ERROR"]
+                            else:
+                                errores_api = response_data["ERROR"] if isinstance(response_data["ERROR"], str) else str(response_data["ERROR"])
+                            
+                            QMessageBox.warning(
+                                self.dlgET, 
+                                "Error en validación del servidor", 
+                                f"El servidor reportó los siguientes errores:\n\n{errores_api}"
+                            )
+                            return
+                            
+                        elif "EXITO" in response_data:
+                            # Éxito en la operación
+                            self.loadTramiteLayerGroup(True)
+                            
+                            # Verificar si hay advertencia en la respuesta
+                            advertencia = response_data.get("advertencia")
+                            
+                            if advertencia:
+                                # Mostrar mensaje de éxito CON advertencia
+                                QMessageBox.warning(
+                                    self.dlgET,
+                                    "Advertencia de Jurisdicción",
+                                    f"Geometría asociada con éxito.\n\nPero se advierte: {advertencia}"
+                                )
+                            else:
+                                # Mostrar mensaje de éxito SIN advertencia
+                                QMessageBox.information(
+                                    self.dlgET,
+                                    "Éxito",
+                                    "Geometría asociada con éxito.\n\nEl buscador puede demorar unos minutos en actualizarse."
+                                )
+                            
+                            # Eliminar feature de capa de dibujo
+                            if featureLayer:
+                                featureLayer.deleteFeatures([feature.id()])
+                                featureLayer.triggerRepaint()
+                            
+                            self.ETtabDatosEspecificos = True
+                            self.procesarTramite()
+                            return
+                            
+                        else:
+                            # Respuesta inesperada
+                            QMessageBox.warning(
+                                self.dlgET,
+                                "Respuesta inesperada",
+                                f"El servidor devolvió una respuesta inesperada: {response_data}"
+                            )
+                            return
+                            
+                    elif r.status_code == 400:
+                        # Error de validación específico de la API
+                        try:
+                            error_data = r.json()
+                            logging.warning(f"Error de validación API: {error_data}")
+                            
+                            # Extraer mensaje de error específico - NUEVA ESTRUCTURA
+                            mensaje_error = ""
+                            
+                            # Intentar extraer de la nueva estructura anidada
+                            if "detalles" in error_data:
+                                detalles = error_data["detalles"]
+                                if isinstance(detalles, dict):
+                                    if "detalles" in detalles:
+                                        sub_detalles = detalles["detalles"]
+                                        if isinstance(sub_detalles, dict) and "ERROR" in sub_detalles:
+                                            if isinstance(sub_detalles["ERROR"], list):
+                                                mensaje_error = "\n".join(sub_detalles["ERROR"])
+                                            else:
+                                                mensaje_error = str(sub_detalles["ERROR"])
+                                    elif "ERROR" in detalles:
+                                        if isinstance(detalles["ERROR"], list):
+                                            mensaje_error = "\n".join(detalles["ERROR"])
+                                        else:
+                                            mensaje_error = detalles["ERROR"]
+                            
+                            # Si no se encontró en la nueva estructura, usar la antigua
+                            if not mensaje_error:
+                                if "detalles" in error_data and "ERROR" in error_data["detalles"]:
+                                    if isinstance(error_data["detalles"]["ERROR"], list):
+                                        mensaje_error = "\n".join(error_data["detalles"]["ERROR"])
+                                    else:
+                                        mensaje_error = error_data["detalles"]["ERROR"]
+                                elif "ERROR" in error_data:
+                                    if isinstance(error_data["ERROR"], list):
+                                        mensaje_error = "\n".join(error_data["ERROR"])
+                                    else:
+                                        mensaje_error = error_data["ERROR"]
+                            
+                            if not mensaje_error:
+                                mensaje_error = f"Error en actualización de geometría (Código: {r.status_code})"
+                            
+                            QMessageBox.warning(
+                                self.dlgET, 
+                                "Error de validación", 
+                                mensaje_error
+                            )
+                            
+                        except Exception as e:
+                            logging.error(f"Error al procesar respuesta de error: {str(e)}")
+                            QMessageBox.warning(
+                                self.dlgET, 
+                                "Error del servidor", 
+                                f"Error en actualización de geometría (Código: {r.status_code})"
+                            )
+                        return
+                        
                     else:
-                        logging.warning("Error en actualizacion geometrica de schema temporal")
-                        QMessageBox.warning(self.dlgET, "Error", "Error en actualización de geometría")
+                        # Otros errores HTTP
+                        logging.warning(f"Error HTTP en actualización geométrica: {r.status_code} - {r.text}")
+                        QMessageBox.warning(
+                            self.dlgET, 
+                            "Error del servidor", 
+                            f"Error en actualización de geometría (Código: {r.status_code})"
+                        )
+                        return
+                        
+                except requests.exceptions.Timeout:
+                    logging.warning("Timeout en conexión al servidor")
+                    QMessageBox.warning(self.dlgET, "Error", "Timeout: El servidor no respondió a tiempo")
+                    return
                 except requests.exceptions.ConnectionError:
-                    logging.warning("Error en servidor")
-                    QMessageBox.warning(self.dlgET, "Error", "Servidor no disponible")
+                    logging.warning("Error de conexión al servidor")
+                    QMessageBox.warning(self.dlgET, "Error", "No se pudo conectar al servidor")
+                    return
                 except Exception as e:
-                    logging.error(f"ERROR: {str(e)}")
-                    error_inesperado()
-                return
+                    logging.error(f"ERROR en comunicación con API: {str(e)}")
+                    QMessageBox.warning(self.dlgET, "Error", f"Error de comunicación: {str(e)}")
+                    return
             else:
                 errores_parrafo = "".join(f"• {e}\n" for e in errores_verificacion)
                 QMessageBox.warning(self.dlgET, "Error en validación", errores_parrafo)
         
         except Exception as e:
             # Captura cualquier error no controlado en el nivel más alto
-            logging.error(f"ERROR GLOBAL en featureAsociadaET: {str(e)}")
-            error_inesperado()
-            errores_parrafo = "".join(f"• {e}\n" for e in errores_verificacion)
-            QMessageBox.critical(self.dlgET, "Error crítico", errores_parrafo)
+            logging.error(f"ERROR GLOBAL en featureAsociadaET: {str(e)}", exc_info=True)
+            QMessageBox.critical(
+                self.dlgET,
+                "Error crítico",
+                f"Se produjo un error inesperado:\n\n{str(e)}\n\n"
+                "Por favor, guarde su trabajo y reintente la operación."
+            )
                     
     def desasociarTramiteGeometry(self):
         item = self.dlgET.entradasTree.model().itemFromIndex(self.dlgET.entradasTree.selectionModel().selectedIndexes()[0]).data()
@@ -3003,64 +3166,20 @@ class SGC:
                 featids = item.data(32).get('featids', [])
 
                 if len(featids) == 1:
-                    # Optimización para un solo featid - versión mejorada
+                    # Método directo - solo buscar por featid
                     def select_single():
                         canvas.mapCanvasRefreshed.disconnect(select_single)
                         
-                        # PRIMERO: Intentar identificar por coordenadas (rápido)
-                        screenPoint = QgsMapTool(canvas).toCanvasCoordinates(mapPoint)
-                        feature_selection = QgsMapToolIdentify(canvas).identify(
-                            screenPoint.x(), screenPoint.y(),
-                            [layer], 
-                            QgsMapToolIdentify.DefaultQgsSetting
-                        )
+                        featid = featids[0]
                         
-                        if len(feature_selection) > 0:
-                            selected_feature = feature_selection[0].mFeature
-                            selected_featid = selected_feature.attribute('featid')
-                            expected_featid = featids[0]
-                            
-                            # VERIFICACIÓN: Comprobar si el featid seleccionado es el correcto
-                            if str(selected_featid) == str(expected_featid):
-                                # ¡Correcto! Seleccionar
-                                layer.select(selected_feature.id())
-                                return
-                            
-                            # Si no es correcto, buscar por featid (más lento pero preciso)
-                            logging.debug(f"Featid incorrecto. Esperado: {expected_featid}, Obtenido: {selected_featid}")
-                            
-                        # SEGUNDO: Si la identificación falló o fue incorrecta, buscar por featid
-                        # Pero limitar la búsqueda a un área pequeña para mantener velocidad
-                        search_rect = QgsRectangle(
-                            mapPoint.x() - 10, mapPoint.y() - 10,
-                            mapPoint.x() + 10, mapPoint.y() + 10
-                        )
+                        # Búsqueda simple por featid
+                        expr = QgsExpression(f'"featid" = {featid}')
                         
-                        # Búsqueda optimizada: filtro espacial
-                        request = QgsFeatureRequest().setFilterRect(search_rect)
-                        
-                        # OPCIONAL: Si quieres optimizar aún más, obtén el índice del campo 'featid'
-                        # y usa setSubsetOfAttributes con el índice
-                        featid_field_index = layer.fields().indexOf('featid')
-                        if featid_field_index >= 0:
-                            request.setSubsetOfAttributes([featid_field_index])
-                        
-                        for feature in layer.getFeatures(request):
-                            if str(feature.attribute('featid')) == str(expected_featid):
-                                layer.select(feature.id())
-                                return
-                        
-                        # TERCERO: Si aún no se encuentra, búsqueda más amplia (más lenta)
-                        logging.debug(f"Featid {expected_featid} no encontrado en área cercana. Buscando en toda la capa...")
-                        expr = QgsExpression(f'"featid" = {expected_featid}')
-                        it = layer.getFeatures(QgsFeatureRequest(expr))
-                        
-                        for feature in it:
+                        # Recorrer hasta encontrar el primero
+                        for feature in layer.getFeatures(QgsFeatureRequest(expr)):
                             layer.select(feature.id())
-                            return
-                            
-                        logging.warning(f"No se encontró el featid {expected_featid} en la capa {layer.name()}")
-
+                            break  # Solo seleccionar el primero
+                    
                     canvas.mapCanvasRefreshed.connect(select_single)
 
                 elif len(featids) > 1:
@@ -3545,6 +3664,7 @@ class SGC:
     """
         RUN METHODS
     """
+    
     def runChangePass(self):
         self.whichDialog = "ChangePass"
         self.toggleEnableToolbarIcons(False)
