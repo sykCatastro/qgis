@@ -952,7 +952,7 @@ class SGC:
             # Obtener capa asociada al feature de forma más eficiente
             try:
                 featureLayer = next((l["obj"] for l in self.layers if l["fisico"] == f"DIBUJO:{item['tabla']}"), None)
-                layer_parcelas = [lay["obj"] for lay in self.layers if lay["fisico"] in ["VW_PARCELAS_GRAF_ALFA", "VW_PARCELAS_GRAF_ALFA_RURALES", "VW_PARCELAS_PH"]]
+                layer_parcelas = [lay["obj"] for lay in self.layers if lay["fisico"] in ["VW_PARCELAS_GRAF_ALFA", "VW_PARCELAS_GRAF_ALFA_RURALES", "VW_PARCELAS_PH", "VW_PARCELAS_REPUTACION_DOMINIO", "VW_PARCELAS_REGULARIZACION_DOMINIAL", "VW_UNIDADES_PARCELARIAS"]]
             except Exception as e:
                 error_inesperado()
                 
@@ -1395,7 +1395,7 @@ class SGC:
                         area_destino = geom_feature.area()
                         area_diff = abs(total_intersect_area_parcelas - area_destino)
 
-                        if area_diff < 0.5 and tramite_objeto not in ['Mensura para reputacion de dominio', 'Mensura para reputacion de dominio y división']:  # Ajustable
+                        if area_diff < 0.5 and tramite_objeto not in ['Mensura para reputacion de dominio', 'Mensura para reputacion de dominio y división'] and padre_geom:  # Ajustable
                             print("🟢 AREA MATCH: La suma de áreas intersectadas coincide con el destino → se marcan como ORIGEN")
                             for s in parcelas_superpuestas_detalle:
                                 if s['featid']:
@@ -1737,7 +1737,7 @@ class SGC:
                         area_destino = geom_feature.area()
                         area_diff = abs(total_intersect_area_parcelas - area_destino)
 
-                        if area_diff < 0.5 and tramite_objeto not in ['Mensura para reputacion de dominio', 'Mensura para reputacion de dominio y división']:  # Ajustable
+                        if area_diff < 0.5 and tramite_objeto not in ['Mensura para reputacion de dominio', 'Mensura para reputacion de dominio y división'] and padre_geom:  # Ajustable
                             print("🟢 AREA MATCH: La suma de áreas intersectadas coincide con el destino → se marcan como ORIGEN")
                             for s in parcelas_superpuestas_detalle:
                                 if s['featid']:
@@ -3663,8 +3663,7 @@ class SGC:
 
     """
         RUN METHODS
-    """
-    
+    """  
     def runChangePass(self):
         self.whichDialog = "ChangePass"
         self.toggleEnableToolbarIcons(False)
