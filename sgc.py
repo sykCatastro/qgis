@@ -681,6 +681,10 @@ class SGC:
         for l in self.layers:
             if l["fisico"] == capa or l["fisico"] in ["VW_PARCELAS_SANEAR"]:
                 search_layers.append(l["obj"])
+        if not search_layers and "VW_PARCELAS_PRESCRIPCIONES" in capa:
+            for l in self.layers:
+                if l["fisico"] in ["DIBUJO:VW_PARCELAS_GRAF_ALFA"]:
+                    search_layers.append(l["obj"])
         self.minimizeDialog(self.whichDialog)
         
         self.selectFeatureMsg = QgsMessageBarItem("Seleccione un objeto de la capa correspondiente al objeto a asociar, haciendo click con el mouse. Cuando lo haga, espere un momento dicho proceso. Tecla ESC para cancelar",level=Qgis.Info, duration=0)
@@ -713,31 +717,63 @@ class SGC:
         METHOD FUNCTIONS
     """
     # Wait dialog
-    def messageWait(self, message = ""):
-        """ Waiting dialog"""
+    def messageWait(self, message=""):
+        """Waiting dialog con animación GIF optimizada. El GIF aparece a la izquierda y el texto a la derecha."""
         msg = QMessageBox()
-        # Get path of .gif in plugin folder
-        gif_path = os.path.join(self.current_dir,'icons/cogs1.gif')
-        # Create Label
-        pixmap = QPixmap(gif_path)
-        pixmap = pixmap.scaled(120,120,Qt.KeepAspectRatio)
-        msg.setIconPixmap(pixmap)
-        icon_label = msg.findChild(QLabel, "qt_msgboxex_icon_label")
-        # Define gif
-        movie = QMovie(gif_path)
-        movie.setScaledSize(QSize(120,120))
-        # Replace static image Icon with gif
-        setattr(msg, 'icon_label', movie) # avoid garbage collector
-        icon_label.setMovie(movie)
-        movie.start()
-        # Set window text and buttons
         msg.setWindowTitle("Cargando formulario...")
         msg.setModal(True)
         msg.setText(message if message != "" else "Espere mientras se carga el formulario...")
-        msg.rejected.connect(msg.close)
         msg.setStandardButtons(QMessageBox.Cancel)
         msg.buttons()[0].setText("Cerrar")
+        msg.rejected.connect(msg.close)
+
+        gif_path = os.path.join(self.current_dir, 'icons', 'cogs1.gif')
+        if os.path.exists(gif_path):
+            movie = QMovie(gif_path)
+            movie.setScaledSize(QSize(120, 120))
+            label = QLabel()
+            label.setMovie(movie)
+            label.setAlignment(Qt.AlignCenter)
+
+            # Obtener el layout del QMessageBox (QGridLayout)
+            layout = msg.layout()
+
+            # Buscar el QLabel que contiene el texto del mensaje
+            # Intento 1: buscar por nombre estándar (funciona en muchas versiones de Qt)
+            text_label = msg.findChild(QLabel, "qt_msgbox_label")
+            if not text_label:
+                # Intento 2: buscar cualquier QLabel cuyo texto sea el mensaje actual
+                for child in msg.children():
+                    if isinstance(child, QLabel) and child.text() == msg.text():
+                        text_label = child
+                        break
+
+            if text_label:
+                # Remover el texto del layout actual y recolocarlo en la columna 1
+                layout.removeWidget(text_label)
+                layout.addWidget(text_label, 0, 1, 1, 1, Qt.AlignLeft | Qt.AlignVCenter)
+            else:
+                # Si no se encuentra (caso muy raro), simplemente agregamos el GIF y confiamos en el layout por defecto
+                pass
+
+            # Agregar el GIF en la columna 0
+            layout.addWidget(label, 0, 0, 1, 1, Qt.AlignCenter)
+
+            # Ajustar el stretch de las columnas para que el texto ocupe el espacio disponible
+            layout.setColumnStretch(0, 0)  # Columna del GIF no se estira
+            layout.setColumnStretch(1, 1)  # Columna del texto se estira para llenar el ancho
+
+            movie.start()
+            # Guardar referencias para evitar recolección
+            setattr(msg, '_movie', movie)
+            setattr(msg, '_label', label)
+        else:
+            # Fallback a imagen estática (se mantiene igual)
+            pixmap = QPixmap(gif_path).scaled(120, 120, Qt.KeepAspectRatio)
+            msg.setIconPixmap(pixmap)
+
         msg.show()
+        QApplication.processEvents()  # Forzar pintado inmediato
         return msg
 
     # Change Password
@@ -1395,7 +1431,7 @@ class SGC:
                         area_destino = geom_feature.area()
                         area_diff = abs(total_intersect_area_parcelas - area_destino)
 
-                        if area_diff < 0.5 and tramite_objeto not in ['Mensura para reputacion de dominio', 'Mensura para reputacion de dominio y división'] and padre_geom:  # Ajustable
+                        if area_diff < 0.5 and tramite_objeto not in ['Mensura para reputacion de dominio', 'Mensura para reputacion de dominio y división']:  # Ajustable
                             print("🟢 AREA MATCH: La suma de áreas intersectadas coincide con el destino → se marcan como ORIGEN")
                             for s in parcelas_superpuestas_detalle:
                                 if s['featid']:
@@ -1737,7 +1773,7 @@ class SGC:
                         area_destino = geom_feature.area()
                         area_diff = abs(total_intersect_area_parcelas - area_destino)
 
-                        if area_diff < 0.5 and tramite_objeto not in ['Mensura para reputacion de dominio', 'Mensura para reputacion de dominio y división'] and padre_geom:  # Ajustable
+                        if area_diff < 0.5 and tramite_objeto not in ['Mensura para reputacion de dominio', 'Mensura para reputacion de dominio y división']:  # Ajustable
                             print("🟢 AREA MATCH: La suma de áreas intersectadas coincide con el destino → se marcan como ORIGEN")
                             for s in parcelas_superpuestas_detalle:
                                 if s['featid']:
@@ -1866,39 +1902,21 @@ class SGC:
                         if parcela_origen.get("asociada"):
                             print(f"[DEBUG-SUP] Parcela origen {partida_origen} está marcada como asociada")
                             
-                            # 3.1. CONSULTAR DIRECTAMENTE LA CAPA TEMPORAL PARA OBTENER TODAS LAS GEOMETRÍAS
+                            # 3.1. CALCULAR SUPERFICIE GRÁFICA TOTAL A PARTIR DE LAS ENTRADAS DEL TRÁMITE
                             area_grafica_total = 0.0
                             geometrias_encontradas = 0
-                            
-                            # Buscar la capa temporal de parcelas
-                            capa_temporal = next((lay["obj"] for lay in self.layers if lay["fisico"] == "TEMPORAL:PARCELAS"), None)
-                            if capa_temporal:
-                                print(f"[DEBUG-SUP] Consultando capa temporal: {capa_temporal.name()}")
-                                
-                                # Buscar todas las features con el id_objeto
-                                expr = QgsExpression(f"\"id_objeto\" = {id_objeto_origen}")
-                                request = QgsFeatureRequest(expr)
-                                
-                                try:
-                                    features = list(capa_temporal.getFeatures(request))
-                                    print(f"[DEBUG-SUP] Encontradas {len(features)} features en capa temporal para id_objeto {id_objeto_origen}")
-                                    
-                                    for feature in features:
-                                        geom = feature.geometry()
-                                        if geom and geom.isGeosValid():
-                                            area = geom.area()
-                                            area_grafica_total += area
-                                            geometrias_encontradas += 1
-                                            print(f"[DEBUG-SUP]   - Geometría {geometrias_encontradas}: {area:.6f} m²")
-                                            
-                                            # Debug: mostrar atributos de la feature
-                                            print(f"[DEBUG-SUP]     Attributos: id={feature.attribute('id')}, id_objeto={feature.attribute('id_objeto')}")
-                                except Exception as e:
-                                    print(f"[DEBUG-SUP] ERROR al consultar features: {str(e)}")
-                            else:
-                                print("[DEBUG-SUP] ERROR: No se encontró la capa temporal de parcelas")
-                            
-                            print(f"[DEBUG-SUP] Superficie gráfica total para {partida_origen}: {area_grafica_total:.6f} m² (suma de {geometrias_encontradas} geometrías)")
+
+                            print(f"[DEBUG-SUP] Buscando en entradas del trámite geometrías con id_objeto = {id_objeto_origen}")
+                            for entrada in self.dataET["entradas"]:
+                                if entrada.get("id_objeto") == id_objeto_origen and entrada.get("geometry"):
+                                    geom = QgsGeometry.fromWkt(entrada["geometry"])
+                                    if geom and geom.isGeosValid():
+                                        area = geom.area()
+                                        area_grafica_total += area
+                                        geometrias_encontradas += 1
+                                        print(f"[DEBUG-SUP]   - Geometría {geometrias_encontradas}: {area:.6f} m² (entrada id {entrada.get('id')})")
+
+                            print(f"[DEBUG-SUP] Superficie gráfica total para {partida_origen}: {area_grafica_total:.6f} m² (suma de {geometrias_encontradas} geometrías de las entradas del trámite)")
                             
                             # 3.2. Obtener superficie alfanumérica (usar la entrada actual)
                             superficie_alfa = 0.0
@@ -2306,7 +2324,43 @@ class SGC:
                             return
                             
                         elif "EXITO" in response_data:
-                            # Éxito en la operación
+                            # Éxito en la operación 
+                            try:
+                                # Buscar la capa de dibujo
+                                feature_layer = next(
+                                    (l["obj"] for l in self.layers if l["fisico"] == f"DIBUJO:{capa}"),
+                                    None
+                                )
+                                print(f"[DEBUG] Capa buscada: DIBUJO:{capa}")
+                                print(f"[DEBUG] Capas disponibles en self.layers: {[l['fisico'] for l in self.layers]}")
+
+                                if feature_layer is None:
+                                    print("[ERROR] No se encontró la capa de dibujo en self.layers")
+                                else:
+                                    print(f"[DEBUG] Capa encontrada: {feature_layer.name()}, válida: {feature_layer.isValid()}")
+                                    if feature_layer.isValid():
+                                        # Verificar si el feature existe antes de eliminarlo
+                                        ids_en_capa = [f.id() for f in feature_layer.getFeatures()]
+                                        print(f"[DEBUG] IDs en la capa: {ids_en_capa}")
+                                        print(f"[DEBUG] ID del feature a eliminar: {feature.id()}")
+                                        if feature.id() in ids_en_capa:
+                                            resultado = feature_layer.deleteFeatures([feature.id()])
+                                            print(f"[DEBUG] Resultado de deleteFeatures: {resultado}")
+                                            if resultado:
+                                                feature_layer.triggerRepaint()
+                                                print("[DEBUG] Feature eliminado y repintado")
+                                            else:
+                                                print("[ERROR] deleteFeatures devolvió False")
+                                        else:
+                                            print("[ERROR] El feature.id() no se encuentra en la capa")
+                                    else:
+                                        print("[ERROR] La capa no es válida (probablemente fue eliminada del proyecto)")
+                            except Exception as e:
+                                print(f"[EXCEPCIÓN] {e}")
+                                import traceback
+                                traceback.print_exc()
+
+                            # Luego continuar con la recarga y mensajes
                             self.loadTramiteLayerGroup(True)
                             
                             # Verificar si hay advertencia en la respuesta
@@ -2729,7 +2783,7 @@ class SGC:
             self.iface.messageBar().pushItem(self.selectFeatureMsg)
         for p in parents_data:
             if p['descripcion'] == "PARCELA":
-                descripcion = f"{p['descripcion']} {p['origen_o_destino']}: Partida Inmobiliaria: {p['partida_inmobiliaria']} Gráfico: {p['featid']} Nomenclatura Catastral: {p['nomenclatura'] if p['nomenclatura'] else ''}"
+                descripcion = f"{p['descripcion']} {p['origen_o_destino']}: Partida Inmobiliaria: {p['partida_inmobiliaria']} Gráfico: {p['featid']}"
             if p['descripcion'] == "MANZANA":
                 descripcion = f"{p['descripcion']}: ID s/Plano: {p['id_plano']}"
             if p['descripcion'] == "VIA":
@@ -2988,6 +3042,9 @@ class SGC:
         self.dlgC.labelNoEncontrado.setVisible(False)
         self.dlgC.labelResultados.setVisible(False)
 
+        # Mostrar mensaje de espera
+        self.waitMsg = self.messageWait("Espere mientras se realiza la búsqueda...")
+
         try:
             # Realiza la solicitud al servidor
             r = requests.get(url=self.URL + "search", 
@@ -3115,6 +3172,11 @@ class SGC:
         except:
             logging.warning("Error en busqueda: " + str(sys.exc_info()[0]) + str(sys.exc_info()[1]))
             QMessageBox.warning(self.dlgC, "Error", "Error en busqueda")
+        finally:
+            # Cerrar mensaje de espera
+            if hasattr(self, 'waitMsg') and self.waitMsg is not None:
+                self.waitMsg.done(0)
+                self.waitMsg = None
 
 
     def consultaItemClicked(self, item, no_error_message=False):
@@ -3261,14 +3323,14 @@ class SGC:
             )
         if asociar: # Borrar objeto de capa de dibujo
             capa = item['capa']
-            if capa in ["VW_PARCELAS_GRAF_ALFA_RURALES", "VW_PARCELAS_PRESCRIPCIONES", "VW_PARCELA_PH", "VW_UNIDADES_PARCELARIAS"]: # Fix 
+            if capa in ["VW_PARCELAS_GRAF_ALFA", "VW_PARCELAS_GRAF_ALFA_RURALES", "VW_PARCELAS_PH", "VW_PARCELAS_REPUTACION_DOMINIO", "VW_PARCELAS_REGULARIZACION_DOMINIAL", "VW_UNIDADES_PARCELARIAS", "VW_PARCELAS_PRESCRIPCIONES"]: # Fix 
                 capa = "VW_PARCELAS_GRAF_ALFA"
             featureLayer = [l["obj"] for l in self.layers if l["fisico"] == f"DIBUJO:{capa}"][0]
             featureLayer.deleteFeatures([feature.id()])
             featureLayer.triggerRepaint()
         else:
             capa = item['capa']
-            if capa in ["VW_PARCELAS_GRAF_ALFA_RURALES", "VW_PARCELAS_PRESCRIPCIONES", "VW_PARCELA_PH", "VW_UNIDADES_PARCELARIAS"]: # Fix 
+            if capa in ["VW_PARCELAS_GRAF_ALFA", "VW_PARCELAS_GRAF_ALFA_RURALES", "VW_PARCELAS_PH", "VW_PARCELAS_REPUTACION_DOMINIO", "VW_PARCELAS_REGULARIZACION_DOMINIAL", "VW_UNIDADES_PARCELARIAS", "VW_PARCELAS_PRESCRIPCIONES"]: # Fix 
                 capa = "VW_PARCELAS_GRAF_ALFA"
             if capa == "VW_PARCELAS_GRAF_ALFA":
                 message = QMessageBox(QMessageBox.Question,"Geometría desasociada", "¿Desea copiar la geometría desasociada a la capa de dibujo correspondiente?",
@@ -3318,7 +3380,7 @@ class SGC:
         # Obtener el ítem seleccionado y la capa
         item = self.dlgEOG.resultsTable.currentItem().data(32)
         capa = item['capa']
-        if capa in ["VW_PARCELA_PH"]:
+        if capa in ["VW_PARCELAS_GRAF_ALFA", "VW_PARCELAS_GRAF_ALFA_RURALES", "VW_PARCELAS_PH", "VW_PARCELAS_REPUTACION_DOMINIO", "VW_PARCELAS_REGULARIZACION_DOMINIAL", "VW_UNIDADES_PARCELARIAS", "VW_PARCELAS_PRESCRIPCIONES"]:
             capa = "VW_PARCELAS_GRAF_ALFA"
         
         print(f"Usando capa: {capa}")
@@ -3528,7 +3590,7 @@ class SGC:
     def EOGasociarGeometria(self):
             item = self.dlgEOG.resultsTable.currentItem().data(32)
             capa = item['capa']
-            if capa in ["VW_PARCELAS_GRAF_ALFA_RURALES", "VW_PARCELAS_PRESCRIPCIONES", "VW_PARCELA_PH"]: # Fix for VW_PARCELAS_GRAF_ALFA_RURALES y PRESCRIPCIONES
+            if capa in ["VW_PARCELAS_GRAF_ALFA", "VW_PARCELAS_GRAF_ALFA_RURALES", "VW_PARCELAS_PH", "VW_PARCELAS_REPUTACION_DOMINIO", "VW_PARCELAS_REGULARIZACION_DOMINIAL", "VW_UNIDADES_PARCELARIAS", "VW_PARCELAS_PRESCRIPCIONES"]: # Fix for VW_PARCELAS_GRAF_ALFA_RURALES y PRESCRIPCIONES
                 capa = "VW_PARCELAS_GRAF_ALFA"
             self.selectMapFeatureByClick(capa = f"DIBUJO:{capa}")
     
@@ -3548,6 +3610,10 @@ class SGC:
         self.dlgEOG.labelNoEncontrado.setVisible(False)
         self.dlgEOG.labelResultados.setVisible(False)
         self.buttonsToggleABM()
+
+        # Mostrar mensaje de espera
+        self.waitMsg = self.messageWait("Espere mientras se realiza la búsqueda...")
+
         try:
             r = requests.get(url=self.URL + "search_ABM", data=json.dumps({"search_terms": self.dlgEOG.lineBuscar.text(), "tipo": self.dlgEOG.comboObjeto.currentText().lower()}),
                             headers={'Authorization': "Bearer {}".format(self.TOKEN)})
@@ -3659,11 +3725,17 @@ class SGC:
             raise
         except:
             logging.warning("Error en busqueda: " + str(sys.exc_info()[0]) + str(sys.exc_info()[1]))
-            QMessageBox.warning(self.dlgEOG, "Error", "No se pueden asociar o desasociar parcelas sin superficie") 
+            QMessageBox.warning(self.dlgEOG, "Error", "No se pueden asociar o desasociar parcelas sin superficie")
+        finally:
+            # Cerrar mensaje de espera
+            if hasattr(self, 'waitMsg') and self.waitMsg is not None:
+                self.waitMsg.done(0)
+                self.waitMsg = None
 
     """
         RUN METHODS
-    """  
+    """
+    
     def runChangePass(self):
         self.whichDialog = "ChangePass"
         self.toggleEnableToolbarIcons(False)

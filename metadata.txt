@@ -6,7 +6,7 @@
 name=Sistema de Gestión Catastral 5.0
 qgisMinimumVersion=3.0
 description=Sistema de Gestión Catastral 5.0
-version=5.0 (Release 32)
+version=5.0 (Release 34)
 author=SyK Catastro Sistemas
 email=sykcatastro.sistemas@gmail.com
 
