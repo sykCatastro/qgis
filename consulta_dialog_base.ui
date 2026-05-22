@@ -74,6 +74,11 @@
    </item>
    <item>
     <property name="text">
+     <string>Propiedad Horizontal</string>
+    </property>
+   </item>
+   <item>
+    <property name="text">
      <string>Prescripciones</string>
     </property>
    </item>

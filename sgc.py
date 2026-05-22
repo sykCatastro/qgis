@@ -297,6 +297,10 @@ class SGC:
                         else:
                             QgsProject.instance().removeMapLayer(child.layerId())
                     root.removeChildNode(group)
+                self.layers = [l for l in self.layers if l.get("fisico") != "VW_PARCELAS_SANEAR"]
+                sanear_layers = QgsProject.instance().mapLayersByName("Parcelas para Sanear Manualmente")
+                for l in sanear_layers:
+                    QgsProject.instance().removeMapLayer(l.id())
             self.layers = []
             self.dataLayers = None
             self.iface.mapCanvas().refresh()
@@ -676,25 +680,72 @@ class SGC:
                     dlg.setMinimumSize(size)
                     dlg.resize(size)
 
-    def selectMapFeatureByClick(self,capa = ""):
+    def selectMapFeatureByClick(self, capa=""):
         search_layers = []
+        # 1. Buscar en self.layers, pero solo si la capa sigue siendo válida
         for l in self.layers:
             if l["fisico"] == capa or l["fisico"] in ["VW_PARCELAS_SANEAR"]:
-                search_layers.append(l["obj"])
+                layer_obj = l["obj"]
+                # Verificar que la capa aún existe en el proyecto y es válida
+                if layer_obj and layer_obj.isValid() and layer_obj in QgsProject.instance().mapLayers().values():
+                    search_layers.append(layer_obj)
+                else:
+                    # Si la capa ya no es válida, la removemos de self.layers
+                    self.layers.remove(l)
+        
+        # 2. Si no se encontró ninguna capa pero la solicitud es para saneamiento,
+        #    buscar directamente en el proyecto por nombre o tabla (fallback robusto)
+        if not search_layers and ("VW_PARCELAS_SANEAR" in capa or "SANEAR" in capa.upper()):
+            # Buscar por nombre visible
+            sanear_layers = QgsProject.instance().mapLayersByName("Parcelas para Sanear Manualmente")
+            if not sanear_layers:
+                # Buscar por tabla física
+                for layer in QgsProject.instance().mapLayers().values():
+                    if layer.dataProvider().name() == "postgres" and "inm_parcela_grafica_sanear" in layer.source():
+                        sanear_layers.append(layer)
+            if sanear_layers:
+                search_layers.extend(sanear_layers)
+                # Opcional: volver a registrar en self.layers para futuras búsquedas
+                for l in sanear_layers:
+                    if not any(x["obj"] == l for x in self.layers):
+                        self.layers.append({
+                            "id": None,
+                            "tabla": "inm_parcela_grafica_sanear",
+                            "tipo": "",
+                            "fisico": "VW_PARCELAS_SANEAR",
+                            "obj": l,
+                            "default_visible": True
+                        })
+        
+        # 3. Fallback original para prescripciones
         if not search_layers and "VW_PARCELAS_PRESCRIPCIONES" in capa:
             for l in self.layers:
                 if l["fisico"] in ["DIBUJO:VW_PARCELAS_GRAF_ALFA"]:
-                    search_layers.append(l["obj"])
-        self.minimizeDialog(self.whichDialog)
+                    layer_obj = l["obj"]
+                    if layer_obj and layer_obj.isValid() and layer_obj in QgsProject.instance().mapLayers().values():
+                        search_layers.append(layer_obj)
         
-        self.selectFeatureMsg = QgsMessageBarItem("Seleccione un objeto de la capa correspondiente al objeto a asociar, haciendo click con el mouse. Cuando lo haga, espere un momento dicho proceso. Tecla ESC para cancelar",level=Qgis.Info, duration=0)
+        if not search_layers:
+            self.iface.messageBar().pushMessage(
+                "Atención",
+                f"No se encontró ninguna capa válida para seleccionar: {capa}. "
+                "Verifique que la capa 'Parcelas para Sanear Manualmente' esté cargada.",
+                level=Qgis.Warning, duration=5
+            )
+            return
+
+        self.minimizeDialog(self.whichDialog)
+        self.selectFeatureMsg = QgsMessageBarItem(
+            "Seleccione un objeto de la capa correspondiente al objeto a asociar, haciendo click con el mouse. Cuando lo haga, espere un momento dicho proceso."
+            "Tecla ESC para cancelar",
+            level=Qgis.Info, duration=0
+        )
         self.iface.messageBar().pushItem(self.selectFeatureMsg)
-        # Connection with map feature selection tool
         canvas = self.iface.mapCanvas()
         self.mapTool = self.IdentifyTool(canvas, search_layers)
         canvas.setMapTool(self.mapTool)
         self.mapTool.found_feats.connect(self.featureSelected)
-        self.featSelDlg = True # Allow to abort selection with Esc key
+        self.featSelDlg = True
         
 
     def featureSelected(self, features):
@@ -3196,9 +3247,12 @@ class SGC:
                 
                 print(f"Datos del item (item.data(32)): {item.data(32)}")
                 # Obtener la capa correspondiente al item
-                layerList = [l for l in self.layers if "tabla" in l and l["tabla"] == item.data(32)["capa"]]
+                capa_original = item.data(32)["capa"]
+                capa_efectiva = capa_original
+
+                layerList = [l for l in self.layers if "tabla" in l and l["tabla"] == capa_efectiva]
                 if not layerList:
-                    return  # No hay capa que coincida, salir sin error
+                    return
                 layerData = layerList[0]
                 layer = layerData["obj"]
 
@@ -3380,8 +3434,6 @@ class SGC:
         # Obtener el ítem seleccionado y la capa
         item = self.dlgEOG.resultsTable.currentItem().data(32)
         capa = item['capa']
-        if capa in ["VW_PARCELAS_GRAF_ALFA", "VW_PARCELAS_GRAF_ALFA_RURALES", "VW_PARCELAS_PH", "VW_PARCELAS_REPUTACION_DOMINIO", "VW_PARCELAS_REGULARIZACION_DOMINIAL", "VW_UNIDADES_PARCELARIAS", "VW_PARCELAS_PRESCRIPCIONES"]:
-            capa = "VW_PARCELAS_GRAF_ALFA"
         
         print(f"Usando capa: {capa}")
         
@@ -3392,22 +3444,50 @@ class SGC:
         search_layers = []
         for l in self.layers:
             if l["fisico"] == capa or l["fisico"] in ["VW_PARCELAS_SANEAR"]:
-                search_layers.append(l["obj"])
+                layer_obj = l["obj"]
+                if layer_obj and layer_obj.isValid() and layer_obj in QgsProject.instance().mapLayers().values():
+                    search_layers.append(layer_obj)
+                else:
+                    self.layers.remove(l)
         
-        self.minimizeDialog(self.whichDialog)
+        if not search_layers and ("VW_PARCELAS_SANEAR" in capa or "SANEAR" in capa.upper()):
+            sanear_layers = QgsProject.instance().mapLayersByName("Parcelas para Sanear Manualmente")
+            if not sanear_layers:
+                for layer in QgsProject.instance().mapLayers().values():
+                    if layer.dataProvider().name() == "postgres" and "inm_parcela_grafica_sanear" in layer.source():
+                        sanear_layers.append(layer)
+            if sanear_layers:
+                search_layers.extend(sanear_layers)
+                for l in sanear_layers:
+                    if not any(x["obj"] == l for x in self.layers):
+                        self.layers.append({
+                            "id": None,
+                            "tabla": "inm_parcela_grafica_sanear",
+                            "tipo": "",
+                            "fisico": "VW_PARCELAS_SANEAR",
+                            "obj": l,
+                            "default_visible": True
+                        })
+        
+        if not search_layers:
+            self.iface.messageBar().pushMessage(
+                "Atención",
+                f"No se encontró ninguna capa válida para desasociar: {capa}.",
+                level=Qgis.Warning, duration=5
+            )
+            return
 
+        self.minimizeDialog(self.whichDialog)
         self.selectFeatureMsg = QgsMessageBarItem(
-            "Seleccione un objeto de la capa correspondiente para desasociar, haciendo click con el mouse. Cuando lo haga, espere un momento dicho proceso. Tecla ESC para cancelar",
+            "Seleccione un objeto de la capa correspondiente para desasociar, haciendo click con el mouse. "
+            "Tecla ESC para cancelar",
             level=Qgis.Info, duration=0
         )
-        self.iface.messageBar().pushItem(self.selectFeatureMsg)
-        
-        # Conectar la herramienta de selección de características del mapa
         canvas = self.iface.mapCanvas()
         self.mapTool = self.IdentifyTool(canvas, search_layers)
         canvas.setMapTool(self.mapTool)
         self.mapTool.found_feats.connect(self.featureSelectedForDesasociar)
-        self.featSelDlg = True  # Permitir abortar la selección con la tecla Esc
+        self.featSelDlg = True
     
     def featureSelectedForDesasociar(self, features):
         """ Manejar el evento de selección de un feature en la capa actual para desasociar """
@@ -3735,7 +3815,6 @@ class SGC:
     """
         RUN METHODS
     """
-    
     def runChangePass(self):
         self.whichDialog = "ChangePass"
         self.toggleEnableToolbarIcons(False)
