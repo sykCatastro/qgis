@@ -130,6 +130,9 @@
    </property>
   </widget>
   <widget class="QPushButton" name="nextButton">
+   <property name="enabled">
+    <bool>true</bool>
+   </property>
    <property name="geometry">
     <rect>
      <x>630</x>
@@ -143,6 +146,9 @@
    </property>
   </widget>
   <widget class="QPushButton" name="prevButton">
+   <property name="enabled">
+    <bool>true</bool>
+   </property>
    <property name="geometry">
     <rect>
      <x>510</x>

@@ -26,7 +26,7 @@
     </rect>
    </property>
    <property name="toolTip">
-    <string>Guardar</string>
+    <string>Buscar geometría</string>
    </property>
    <property name="text">
     <string>Buscar</string>
@@ -42,7 +42,7 @@
     </rect>
    </property>
    <property name="toolTip">
-    <string>Seleccionar Objeto en Mapa</string>
+    <string>Asociar geometría seleccionada</string>
    </property>
    <property name="text">
     <string>Asociar</string>
@@ -89,12 +89,22 @@
    </item>
    <item>
     <property name="text">
+     <string>Parcelas Saneables</string>
+    </property>
+   </item>
+   <item>
+    <property name="text">
      <string>Manzanas</string>
     </property>
    </item>
    <item>
     <property name="text">
      <string>Centros Urbanos</string>
+    </property>
+   </item>
+   <item>
+    <property name="text">
+     <string>Localidades</string>
     </property>
    </item>
    <item>
@@ -112,6 +122,11 @@
      <string>Departamentos</string>
     </property>
    </item>
+   <item>
+    <property name="text">
+     <string>Calles</string>
+    </property>
+   </item>
   </widget>
   <widget class="QPushButton" name="buttonDesasociar">
    <property name="geometry">
@@ -123,7 +138,7 @@
     </rect>
    </property>
    <property name="toolTip">
-    <string>Seleccionar Nueva Geometría</string>
+    <string>Desasociar geometría seleccionada</string>
    </property>
    <property name="text">
     <string>Desasociar</string>
