@@ -3262,17 +3262,17 @@ class SGC:
                 # No está asociada => ícono rojo siempre
                 parents.append(QStandardItem(QIcon(os.path.join(self.current_dir, 'icons/cancel.png')), descripcion))
             parents[-1].setData({"id": p["id"],
-                                 "asociada": p["asociada"] if "asociada" in p else False,
-                                 "tipo": p["descripcion"], 
-                                 "tabla_grafica": p["tabla_grafica"], 
-                                 "featid": p["featid"],
-                                 "tabla": p["tabla"],
-                                 "superficie": p["superficie"] if "superficie" in p else None,
-                                 "anidacion": 0,
-                                 "id_objeto": p["id_objeto"] if "id_objeto" in p else None,
-                                 "dato_alfa_jur": p["dato_alfa_jur"] if "dato_alfa_jur" in p else None,
-                                 "nombre_manzana": p["nombre_manzana"] if "nombre_manzana" in p else None,
-                                 "partida_inmobiliaria": p["partida_inmobiliaria"] if "partida_inmobiliaria" in p else None})
+                                "asociada": p["asociada"] if "asociada" in p else False,
+                                "tipo": p["descripcion"], 
+                                "tabla_grafica": p["tabla_grafica"], 
+                                "featid": p["featid"],
+                                "tabla": p["tabla"],
+                                "superficie": p["superficie"] if "superficie" in p else None,
+                                "anidacion": 0,
+                                "id_objeto": p["id_objeto"] if "id_objeto" in p else None,
+                                "dato_alfa_jur": p["dato_alfa_jur"] if "dato_alfa_jur" in p else None,
+                                "nombre_manzana": p["nombre_manzana"] if "nombre_manzana" in p else None,
+                                "partida_inmobiliaria": p["partida_inmobiliaria"] if "partida_inmobiliaria" in p else None})
             p["anidacion"] = 0
             font = parents[-1].font()
             font.setPointSize(13)
@@ -3294,16 +3294,16 @@ class SGC:
                 elif str(self.dataET["tramite"]["objeto"]) in ['Mensura Para Prescripción Adquisitiva', 'Mensura Para Prescripción Adquisitiva y División', 'Mensura para reputacion de dominio', 'Mensura para reputacion de dominio y división', 'Mensura Para Prescripción Administrativa Ley N° 24320', 'Mensura para Plan de Regularización Dominial según Ley 5836/2008 y modificatoria Ley 6211/2013']:
                     parents.append(QStandardItem(QIcon(os.path.join(self.current_dir,'icons/ok.png')), 'PARCELAS SIN ORIGEN'))
                     parents[-1].setData({"id": c["id_padre"],
-                                 "asociada": False,
-                                 "tipo": c["descripcion"], 
-                                 "descripcion" : "SIN ORIGEN",
-                                 "tabla_grafica": c["tabla_grafica"], 
-                                 "featid": c["featid"],
-                                 "tabla": c["tabla"],
-                                 "superficie": c["superficie"] if "superficie" in c else None,
-                                 "anidacion": 0,
-                                 "dato_alfa_jur": c["dato_alfa_jur"] if "dato_alfa_jur" in c else None,
-                                 "id_objeto": c["id_objeto"] if "id_objeto" in c else None})
+                                "asociada": False,
+                                "tipo": c["descripcion"], 
+                                "descripcion" : "SIN ORIGEN",
+                                "tabla_grafica": c["tabla_grafica"], 
+                                "featid": c["featid"],
+                                "tabla": c["tabla"],
+                                "superficie": c["superficie"] if "superficie" in c else None,
+                                "anidacion": 0,
+                                "dato_alfa_jur": c["dato_alfa_jur"] if "dato_alfa_jur" in c else None,
+                                "id_objeto": c["id_objeto"] if "id_objeto" in c else None})
                     font = parents[-1].font()
                     font.setPointSize(13)
                     parents[-1].setFont(font)
@@ -3321,17 +3321,17 @@ class SGC:
                     else:
                         child = QStandardItem(QIcon(os.path.join(self.current_dir,'icons/cancel.png')),descripcion)
                     child.setData({"id": c["id"],
-                                   "id_padre":c["id_padre"], 
-                                   "asociada": c["asociada"] if "asociada" in c else False,
-                                   "tipo": c["descripcion"], 
-                                   "tabla_grafica": c["tabla_grafica"], 
-                                   "tabla": c["tabla"],
-                                   "featid": c["featid"],
-                                   "superficie": c["superficie"] if "superficie" in c else None,
-                                   "anidacion": parent.data()["anidacion"] + 1,
-                                   "dato_alfa_jur": c["dato_alfa_jur"] if "dato_alfa_jur" in c else None,
-                                   "nombre_manzana": c["nombre_manzana"] if "nombre_manzana" in c else None,
-                                   "id_objeto": c["id_objeto"] if "id_objeto" in c else None})
+                                "id_padre":c["id_padre"], 
+                                "asociada": c["asociada"] if "asociada" in c else False,
+                                "tipo": c["descripcion"], 
+                                "tabla_grafica": c["tabla_grafica"], 
+                                "tabla": c["tabla"],
+                                "featid": c["featid"],
+                                "superficie": c["superficie"] if "superficie" in c else None,
+                                "anidacion": parent.data()["anidacion"] + 1,
+                                "dato_alfa_jur": c["dato_alfa_jur"] if "dato_alfa_jur" in c else None,
+                                "nombre_manzana": c["nombre_manzana"] if "nombre_manzana" in c else None,
+                                "id_objeto": c["id_objeto"] if "id_objeto" in c else None})
                     for e in self.dataET["entradas"]:
                         if e["id"] == c["id"]:
                             e["anidacion"] = parent.data()["anidacion"] + 1
@@ -3412,9 +3412,31 @@ class SGC:
         except: pass
         self.dlgET.entradasTree.selectionModel().selectionChanged.connect(self.tramiteTreeSelectedItem)
 
-       # Deselect all features from all layers
-        for l in [l["obj"] for l in self.layers if l["tipo"] != "oms"]:
-            l.removeSelection()
+        # ========== CORRECCIÓN DEFINITIVA: evitar error con capas eliminadas ==========
+        # 1. Limpiar self.layers de entradas cuya capa ya no existe en el proyecto
+        valid_layers = []
+        for layer_entry in self.layers:
+            try:
+                layer_obj = layer_entry.get("obj")
+                if layer_obj is not None and layer_obj.isValid():
+                    # Verificar que la capa aún esté en el proyecto
+                    if layer_obj in QgsProject.instance().mapLayers().values():
+                        valid_layers.append(layer_entry)
+            except RuntimeError:
+                # El objeto C++ ha sido eliminado, lo omitimos
+                continue
+        self.layers = valid_layers
+
+        # 2. Deseleccionar solo capas válidas (con try-except adicional por si se eliminan durante la iteración)
+        for layer_entry in self.layers:
+            try:
+                layer_obj = layer_entry.get("obj")
+                if layer_obj is not None and layer_obj.isValid() and layer_entry.get("tipo") != "oms":
+                    layer_obj.removeSelection()
+            except RuntimeError:
+                continue
+        # ========== FIN CORRECCIÓN ==========
+
         # Dialog Show 
         self.minimizeDialog("dlgBT")
         self.dlgET.show()
@@ -4409,15 +4431,33 @@ class SGC:
                 # Limpiar referencias antiguas en self.layers a la capa de saneamiento
                 self.layers = [l for l in self.layers if l.get("fisico") != "VW_PARCELAS_SANEAR"]
                 
-                # Eliminar grupo "Sanear" antiguo de forma segura
+                # ========== ELIMINACIÓN SEGURA DEL GRUPO "Sanear" ==========
                 old_group = root.findGroup("Sanear")
                 if old_group:
-                    parent = old_group.parent()
-                    if parent:
-                        idx = parent.children().index(old_group)
-                        parent.takeChildAt(idx)  # desvincula el nodo
-                        old_group.deleteLater()  # programar eliminación (seguro)
-                
+                    try:
+                        # Eliminar todas las capas hijas del grupo antes de eliminar el grupo
+                        for child in old_group.children():
+                            if isinstance(child, QgsLayerTreeLayer):
+                                QgsProject.instance().removeMapLayer(child.layerId())
+                            elif isinstance(child, QgsLayerTreeGroup):
+                                # Si hay subgrupos (no debería), eliminarlos recursivamente
+                                for subchild in child.children():
+                                    if isinstance(subchild, QgsLayerTreeLayer):
+                                        QgsProject.instance().removeMapLayer(subchild.layerId())
+                                root.removeChildNode(child)
+                        # Finalmente eliminar el grupo usando removeChildNode (método correcto)
+                        root.removeChildNode(old_group)
+                    except Exception as e:
+                        # Si falla la eliminación, informar al usuario y salir
+                        QMessageBox.warning(
+                            self.iface.mainWindow(),
+                            "Error al eliminar grupo Sanear",
+                            "Elimine el Grupo 'Sanear' antes de volver a apretar el Botón Sanear."
+                        )
+                        logging.error(f"Error al eliminar grupo Sanear: {str(e)}")
+                        return
+                # ========== FIN ELIMINACIÓN ==========
+
                 # Crear grupo nuevo en la posición más alta (índice 0)
                 sanear_group = root.insertGroup(0, "Sanear")
                 
